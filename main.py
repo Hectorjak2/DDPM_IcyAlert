@@ -49,32 +49,10 @@ def run(carra=False,
     #visualize_sample(sample, finite_mask=land_mask)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train a DDPM model on CARRA2 or FashionMNIST dataset")
-
-    # Dataset selection
-    parser.add_argument("--carra", action="store_true", help="Use CARRA2 dataset")
-    parser.add_argument("--fashion", action="store_true", help="Use FashionMNIST dataset")
-
-    # Training hyperparameters
-    parser.add_argument("--timesteps", type=int, default=100, help="Number of diffusion timesteps (default: 100)")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size for training (default: 16)")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs (default: 10)")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default: 1e-3)")
-
-    # Data options
-    parser.add_argument("--download-carra2", action="store_true", help="Download CARRA2 data before training")
-    parser.add_argument("--quiet", action="store_true", help="Suppress verbose output")
-
-    args = parser.parse_args()
-
     # Run the training
     run(
-        carra=args.carra,
-        fashion=args.fashion,
-        verbose=not args.quiet,
-        timesteps=args.timesteps,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        lr=args.lr,
-        download_carra2_data=args.download_carra2
+        carra=True,
+        timesteps=200,
+        batch_size=16,
+        epochs=20,
     )

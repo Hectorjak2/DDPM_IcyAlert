@@ -30,4 +30,4 @@
 nvidia-smi
 #load cuda 
 module load cuda/12.4.1
-/zhome/eb/6/205174/DDPM_IcyAlert/.venv/bin/python /zhome/eb/6/205174/DDPM_IcyAlert/main.py --carra --timesteps 100 --batch-size 16 --epochs 20
+/zhome/eb/6/205174/DDPM_IcyAlert/.venv/bin/python /zhome/eb/6/205174/DDPM_IcyAlert/main.py
