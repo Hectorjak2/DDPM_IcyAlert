@@ -8,7 +8,7 @@
 4. Create a file called ".cdsapirc" containing the url and key in ones home/user folder. The file should have two lines.
 For linux and macos: 
 cat > $HOME/.cdsapirc << 'EOF' url: 'YOURURL' key: 'YOURKEY' EOF
-
+    
 5. You may be missing eccodes and cfgrib, which are needed to read the grib files. You can install them using brew install eccodes and pip install cfgrib. 
 """
 
