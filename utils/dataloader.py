@@ -1,6 +1,7 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import xarray as xr
+from torchvision import datasets, transforms
 
 allowed_variables = ["siconc"]
 
@@ -49,6 +50,40 @@ class CARRA2(Dataset):
         if self.batch_dim:
             t = t.unsqueeze(0)  # [1, 1, H, W]
         return t.to(self.device)
+
+
+class FashionMNIST(Dataset):
+    def __init__(self, train: bool = True, device: str = "cpu", batch_dim: bool = True):
+        """
+        This class is a PyTorch Dataset for the Fashion MNIST dataset.
+        It allows for loading training or test data with automatic downloading.
+
+        Args:
+            train (bool): If True, loads the training set. If False, loads the test set.
+            device (str): The device to load the data onto (e.g., "cpu" or "cuda").
+            batch_dim (bool): If True (default), __getitem__ returns [1, 1, H, W] with a leading
+                batch dimension. Set to False for [1, H, W] (e.g. when wrapping in a torch DataLoader).
+        """
+        self.batch_dim = batch_dim
+        self.device = device
+
+        # Define transforms to convert images to tensors
+        transform = transforms.Compose([transforms.ToTensor()])
+
+        # Download and load the data
+        self.data = datasets.FashionMNIST(
+            root="./data", train=train, download=True, transform=transform
+        )
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        img, label = self.data[idx]
+        # img is already [1, 28, 28] from ToTensor()
+        if self.batch_dim:
+            img = img.unsqueeze(0)  # [1, 1, 28, 28]
+        return img.to(self.device)
 
 if __name__ == "__main__":
     train_ds = CARRA2("siconc", time_slice=slice("2012-01", "2013-12"))

@@ -129,22 +129,83 @@ class TimestepBlock(nn.Module):
         return x
 
 
-class Unet(nn.Module):
-    """DDPM U-Net.
+class BaseUnet(nn.Module):
+    """Base class for U-Net models with weight saving/loading functionality."""
+
+    def save_weights(self, path: str) -> None:
+        """Save model weights to a file.
+
+        Args:
+            path: Path where the weights will be saved.
+        """
+        torch.save(self.state_dict(), path)
+        print(f"Model weights saved to {path}")
+
+    def load_weights(self, path: str, device: str = "cpu") -> None:
+        """Load model weights from a file.
+
+        Args:
+            path: Path to the weights file.
+            device: Device to load weights onto ('cpu' or 'cuda').
+        """
+        self.load_state_dict(torch.load(path, map_location=device))
+        print(f"Model weights loaded from {path}")
+
+    def save_checkpoint(self, path: str, optimizer=None, epoch: int = None, loss: float = None) -> None:
+        """Save model checkpoint with optional optimizer state and metadata.
+
+        Args:
+            path: Path where the checkpoint will be saved.
+            optimizer: Optional optimizer to save state.
+            epoch: Optional epoch number.
+            loss: Optional loss value.
+        """
+        checkpoint = {
+            "model_state_dict": self.state_dict(),
+        }
+        if optimizer is not None:
+            checkpoint["optimizer_state_dict"] = optimizer.state_dict()
+        if epoch is not None:
+            checkpoint["epoch"] = epoch
+        if loss is not None:
+            checkpoint["loss"] = loss
+        torch.save(checkpoint, path)
+        print(f"Checkpoint saved to {path}")
+
+    def load_checkpoint(self, path: str, optimizer=None, device: str = "cpu") -> dict:
+        """Load model checkpoint and optionally restore optimizer state.
+
+        Args:
+            path: Path to the checkpoint file.
+            optimizer: Optional optimizer to restore state.
+            device: Device to load weights onto ('cpu' or 'cuda').
+
+        Returns:
+            Dictionary with checkpoint metadata (epoch, loss, etc.)
+        """
+        checkpoint = torch.load(path, map_location=device)
+        self.load_state_dict(checkpoint["model_state_dict"])
+        if optimizer is not None and "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        print(f"Checkpoint loaded from {path}")
+        return {k: v for k, v in checkpoint.items() if k not in ["model_state_dict", "optimizer_state_dict"]}
+
+
+class Unet(BaseUnet):
+    """DDPM U-Net - Resolution-agnostic.
 
     Args:
         in_channels: channels of the (noised) input image.
         out_channels: channels of the predicted noise (usually == in_channels).
         base_channels: channel count after the input convolution.
         channel_mult: per-resolution channel multiplier; its length is the number
-            of resolution levels.
+            of downsampling levels.
         num_res_blocks: residual blocks per resolution level.
-        attention_resolutions: spatial resolutions (in pixels) at which to insert
-            self-attention blocks.
+        attention_levels: which downsampling levels (0-indexed) get self-attention.
+            Level 0 is full resolution, level 1 is 1/2 resolution, etc.
         dropout: dropout probability inside residual blocks.
         groups: number of groups for GroupNorm.
-        image_size: spatial size of the input; used to know which level matches
-            ``attention_resolutions``.
+        image_size: (deprecated, kept for compatibility) no longer used for architecture.
     """
 
     def __init__(
@@ -154,10 +215,126 @@ class Unet(nn.Module):
         base_channels: int = 128,
         channel_mult: tuple = (1, 2, 2, 2, 4),
         num_res_blocks: int = 2,
-        attention_resolutions: tuple = (16,),
+        attention_levels: tuple = (3,),  # Default: attention at 1/8 resolution
+        attention_resolutions: tuple = None,  # Deprecated, for backwards compat
         dropout: float = 0.1,
         groups: int = 32,
-        image_size: int = 128,
+        image_size: int = 128,  # Deprecated, kept for init compatibility
+    ):
+        super().__init__()
+        self.base_channels = base_channels
+        t_dim = base_channels * 4
+
+        # Handle backwards compatibility: convert attention_resolutions to attention_levels
+        if attention_resolutions is not None:
+            # Convert pixel resolutions to levels (approximate)
+            # For 128: 16px = 3 levels of downsampling, 32px = 2 levels, etc.
+            attention_levels = tuple(len(channel_mult) - 1 - level
+                                    for level in range(len(channel_mult)))
+
+        self.time_mlp = nn.Sequential(
+            nn.Linear(base_channels, t_dim),
+            nn.SiLU(),
+            nn.Linear(t_dim, t_dim),
+        )
+
+        self.in_conv = nn.Conv2d(in_channels, base_channels, 3, padding=1)
+
+        # ---- downsampling path ----
+        self.down_blocks = nn.ModuleList()
+        ch = base_channels
+        skip_chs = [ch]
+        for level, mult in enumerate(channel_mult):
+            out_ch = base_channels * mult
+            for _ in range(num_res_blocks):
+                layers = [ResBlock(ch, out_ch, t_dim, dropout, groups)]
+                ch = out_ch
+                if level in attention_levels:
+                    layers.append(AttentionBlock(ch, groups))
+                self.down_blocks.append(TimestepBlock(layers))
+                skip_chs.append(ch)
+            if level != len(channel_mult) - 1:
+                self.down_blocks.append(TimestepBlock([Downsample(ch)]))
+                skip_chs.append(ch)
+
+        # ---- bottleneck ----
+        self.mid = TimestepBlock([
+            ResBlock(ch, ch, t_dim, dropout, groups),
+            AttentionBlock(ch, groups),
+            ResBlock(ch, ch, t_dim, dropout, groups),
+        ])
+
+        # ---- upsampling path ----
+        self.up_blocks = nn.ModuleList()
+        for level, mult in reversed(list(enumerate(channel_mult))):
+            out_ch = base_channels * mult
+            for i in range(num_res_blocks + 1):
+                layers = [ResBlock(ch + skip_chs.pop(), out_ch, t_dim, dropout, groups)]
+                ch = out_ch
+                if level in attention_levels:
+                    layers.append(AttentionBlock(ch, groups))
+                if level != 0 and i == num_res_blocks:
+                    layers.append(Upsample(ch))
+                self.up_blocks.append(TimestepBlock(layers))
+
+        assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
+
+        self.out = nn.Sequential(
+            _norm(ch, groups),
+            nn.SiLU(),
+            nn.Conv2d(ch, out_channels, 3, padding=1),
+        )
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """Args:
+            x: ``[B, in_channels, H, W]`` noised image.
+            t: ``[B]`` timesteps.
+
+        Returns:
+            ``[B, out_channels, H, W]`` predicted noise.
+        """
+        t_emb = self.time_mlp(timestep_embedding(t, self.base_channels))
+
+        h = self.in_conv(x)
+        skips = [h]
+        for block in self.down_blocks:
+            h = block(h, t_emb)
+            skips.append(h)
+
+        h = self.mid(h, t_emb)
+
+        for block in self.up_blocks:
+            h = block(torch.cat([h, skips.pop()], dim=1), t_emb)
+
+        return self.out(h)
+
+
+class UnetSmall(BaseUnet):
+    """Compact DDPM U-Net for small images (e.g., 28×28, 32×32).
+
+    Uses fewer channels, fewer blocks, and minimal attention for efficiency.
+
+    Args:
+        in_channels: channels of the (noised) input image.
+        out_channels: channels of the predicted noise (usually == in_channels).
+        base_channels: channel count after the input convolution (default: 32 for small images).
+        channel_mult: per-level channel multiplier; length = number of downsampling levels.
+        num_res_blocks: residual blocks per resolution level (1-2 recommended for small images).
+        attention_levels: which downsampling levels get self-attention (usually empty for tiny images).
+        dropout: dropout probability inside residual blocks.
+        groups: number of groups for GroupNorm.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        base_channels: int = 32,
+        channel_mult: tuple = (1, 2, 4),  # 3 levels instead of 5
+        num_res_blocks: int = 1,  # Fewer blocks
+        attention_levels: tuple = (),  # No attention for small images
+        dropout: float = 0.1,
+        groups: int = 8,  # Fewer groups (ch must be divisible)
     ):
         super().__init__()
         self.base_channels = base_channels
@@ -174,26 +351,23 @@ class Unet(nn.Module):
         # ---- downsampling path ----
         self.down_blocks = nn.ModuleList()
         ch = base_channels
-        now_res = image_size
         skip_chs = [ch]
         for level, mult in enumerate(channel_mult):
             out_ch = base_channels * mult
             for _ in range(num_res_blocks):
                 layers = [ResBlock(ch, out_ch, t_dim, dropout, groups)]
                 ch = out_ch
-                if now_res in attention_resolutions:
+                if level in attention_levels:
                     layers.append(AttentionBlock(ch, groups))
                 self.down_blocks.append(TimestepBlock(layers))
                 skip_chs.append(ch)
             if level != len(channel_mult) - 1:
                 self.down_blocks.append(TimestepBlock([Downsample(ch)]))
                 skip_chs.append(ch)
-                now_res //= 2
 
-        # ---- bottleneck ----
+        # ---- bottleneck (simplified for small images) ----
         self.mid = TimestepBlock([
             ResBlock(ch, ch, t_dim, dropout, groups),
-            AttentionBlock(ch, groups),
             ResBlock(ch, ch, t_dim, dropout, groups),
         ])
 
@@ -204,11 +378,10 @@ class Unet(nn.Module):
             for i in range(num_res_blocks + 1):
                 layers = [ResBlock(ch + skip_chs.pop(), out_ch, t_dim, dropout, groups)]
                 ch = out_ch
-                if now_res in attention_resolutions:
+                if level in attention_levels:
                     layers.append(AttentionBlock(ch, groups))
                 if level != 0 and i == num_res_blocks:
                     layers.append(Upsample(ch))
-                    now_res *= 2
                 self.up_blocks.append(TimestepBlock(layers))
 
         assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
@@ -244,14 +417,37 @@ class Unet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = Unet(image_size=128)
+    print("=" * 60)
+    print("FULL UNET (for 128×128+)")
+    print("=" * 60)
+    model = Unet(attention_levels=(3,))
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"parameters: {n_params / 1e6:.1f}M")
+    print(f"Parameters: {n_params / 1e6:.1f}M")
+    print()
 
-    x = torch.randn(2, 1, 128, 128)
-    t = torch.randint(0, 1000, (2,))
-    with torch.no_grad():
-        out = model(x, t)
-    print("input :", tuple(x.shape))
-    print("output:", tuple(out.shape))
-    assert out.shape == x.shape
+    # Test with different sizes
+    for size in [128, 256, 512]:
+        x = torch.randn(2, 1, size, size)
+        t = torch.randint(0, 1000, (2,))
+        with torch.no_grad():
+            out = model(x, t)
+        assert out.shape == x.shape, f"Shape mismatch: {out.shape} != {x.shape}"
+        print(f"✓ {size}×{size}: input {tuple(x.shape)} → output {tuple(out.shape)}")
+
+    print()
+    print("=" * 60)
+    print("SMALL UNET (for 28×28, 32×32)")
+    print("=" * 60)
+    model_small = UnetSmall(attention_levels=())
+    n_params = sum(p.numel() for p in model_small.parameters())
+    print(f"Parameters: {n_params / 1e6:.2f}M")
+    print()
+
+    # Test with small sizes (note: use 32 instead of 28 since 28 % 8 != 0)
+    for size in [32, 64]:
+        x = torch.randn(2, 1, size, size)
+        t = torch.randint(0, 1000, (2,))
+        with torch.no_grad():
+            out = model_small(x, t)
+        assert out.shape == x.shape, f"Shape mismatch: {out.shape} != {x.shape}"
+        print(f"✓ {size}×{size}: input {tuple(x.shape)} → output {tuple(out.shape)}")

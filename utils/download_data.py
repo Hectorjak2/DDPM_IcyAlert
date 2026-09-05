@@ -54,5 +54,4 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
     print(f"Deleted temporary GRIB file {grib_file}")
 
 if __name__ == "__main__":
-    download_carra2_monthly_data("dataset", ["2012", "2013","2014"])
-    
+    download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)])

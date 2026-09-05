@@ -1,11 +1,16 @@
+import os
+from random import sample
+
 import torch
+from torch.optim import Adam
 import torch.nn.functional as F
 
 class DDPM:
-    def __init__(self, timesteps: int = 1000, device: str = "mps"):
+    def __init__(self, timesteps: int = 1000, device: str = "mps", image_size: int = 128):
         self.timesteps = timesteps
         self.device = device
-    
+        self.image_size = image_size
+
     def beta_schedule(self, timesteps, start=0.0001, end=0.02):
         """
         Linear schedule for beta values.
@@ -78,4 +83,85 @@ class DDPM:
         loss = se[mask].mean()
 
         return loss
+    
+    @torch.no_grad()
+    def p_sample(self, model, x, t, ): 
+        """
+        Reverse diffusion process: p(x_{t-1} | x_t)
 
+        Args:
+            model: The U-Net model.
+            x: Current image tensor of shape [B, C, H, W].
+            t: Current timestep tensor of shape [B].
+        """
+        betas = self.beta_schedule(self.timesteps)
+        alphas, alphas_bar = self.get_alphas(betas)
+        z = torch.randn_like(x) if t[0] > 1 else torch.zeros_like(x)
+
+        #Reshape 
+        betas_t = betas[t].view(-1, 1, 1, 1)
+        alphas_t = alphas[t].view(-1, 1, 1, 1)
+        alphas_bar_t = alphas_bar[t].view(-1, 1, 1, 1)
+
+        # Getting xt_{-1}
+        xt = 1/torch.sqrt(alphas_t) * (x - (1- alphas_t)/(torch.sqrt(1-alphas_bar_t)) * model(x, t)) + torch.sqrt(betas_t) * z
+
+        return xt
+    
+    @torch.no_grad()
+    def sample(self, model): 
+        xt = torch.randn((1, 1, self.image_size, self.image_size), device=self.device)
+        for t in reversed(range(self.timesteps)):
+            t_tensor = torch.tensor([t], device=self.device).long()
+            xt = self.p_sample(model, xt, t_tensor)
+
+        return xt
+
+    def train(self, model, dataloader, device: str, timesteps: int, epochs: int, lr: float = 1e-3): 
+        n_params = sum(p.numel() for p in model.parameters())
+        print(f"parameters: {n_params / 1e6:.1f}M")
+        os.makedirs("checkpoints", exist_ok=True)
+
+        model.to(device)
+        optimizer = Adam(model.parameters(), lr=lr)
+
+        for epoch in range(epochs):
+            if epoch % 10 == 0 and epoch > 0: 
+                model.save_checkpoint(f"checkpoints/model_epoch_{epoch}.pth", 
+                                    optimizer=optimizer, 
+                                    epoch=epoch)
+                            
+            for step, batch in enumerate(dataloader):
+                batch = batch.to(device)
+
+                optimizer.zero_grad()
+
+                # sample t from U(0,T)
+                t = torch.randint(0, timesteps, (batch.shape[0],), device=device).long()
+                
+                loss = self.compute_loss(model, batch, t)
+
+                print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.3f}")
+
+                loss.backward()
+                optimizer.step() 
+
+        model.save_weights(f"checkpoints/model_final_t{timesteps}_epochs{epochs}_.pth")
+
+
+if __name__ == "__main__":
+    """model = Unet()
+    optimizer = torch.optim.Adam(model.parameters())
+
+    # Save during training
+    if epoch % 10 == 0:
+        model.save_checkpoint("checkpoints/model_epoch_{epoch}.pth", 
+                            optimizer=optimizer, 
+                            epoch=epoch, 
+                            loss=current_loss)
+
+    # Resume training
+    metadata = model.load_checkpoint("checkpoints/model_epoch_50.pth", 
+                                    optimizer=optimizer, 
+                                    device="cuda")
+    start_epoch = metadata["epoch"] + 1"""

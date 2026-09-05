@@ -2,9 +2,12 @@ import xarray as xr
 import torch
 import matplotlib.pyplot as plt
 
-def visualize_sample(sample: torch.Tensor):
-    sample = sample.squeeze()  # drop any leading batch/channel dims -> [H, W]
-    finite_mask = torch.isfinite(sample)
+def visualize_sample(sample: torch.Tensor, finite_mask: torch.Tensor = None):
+    sample = sample.cpu().squeeze()  # drop any leading batch/channel dims -> [H, W]
+    sample[finite_mask == 0] = float("nan")  # set land pixels to NaN for visualization
+
+    if finite_mask is None:
+        finite_mask = torch.isfinite(sample)
 
     plt.figure(figsize=(8, 8))
 
@@ -24,4 +27,5 @@ def visualize_sample(sample: torch.Tensor):
     plt.colorbar(img, label="sea ice concentration", shrink=0.7)
     plt.title("Sea ice concentration (CARRA2-WEST)")
     plt.show()
+
 
