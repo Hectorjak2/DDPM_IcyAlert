@@ -49,7 +49,7 @@ def run(carra=False,
         )
     else:
         model = UnetSmall()
-        
+
     model.to(device)
 
     ddpm.train(model, dataloader, device, timesteps, epochs=epochs, lr=lr)
@@ -61,6 +61,8 @@ def run(carra=False,
 
 if __name__ == "__main__":
     # Run the training
+    print("The python script is running ...")
+    
     run(
         carra=True,
         timesteps=100,
