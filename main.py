@@ -38,7 +38,7 @@ def run(carra=False,
 
     #Defining the DDPM model, and the UNET
     ddpm = DDPM(timesteps=timesteps, device=device, image_size=train_ds[0][0].shape[-1])
-    model = Unet() if carra else UnetSmall() if fashion else None
+    model = Unet(attention_levels=()) if carra else UnetSmall() if fashion else None
     model.to(device)
 
     ddpm.train(model, dataloader, device, timesteps, epochs=epochs, lr=lr)
