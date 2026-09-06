@@ -37,7 +37,7 @@ class CARRA2(Dataset):
             self.da = da.isel(y=slice(1272, 1400), x=slice(800, 928))
         elif WEST:
             #CARRA2-WEST AREA:
-            self.da = da.isel(y=slice(300, 1520), x=slice(880, 2100))
+            self.da = da.isel(y=slice(300, 1516), x=slice(884, 2100))
         else:
             self.da = da
 
