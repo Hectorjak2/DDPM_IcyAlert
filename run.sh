@@ -30,5 +30,4 @@
 nvidia-smi
 #load cuda 
 module load cuda/12.4.1
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 /zhome/eb/6/205174/DDPM_IcyAlert/.venv/bin/python /zhome/eb/6/205174/DDPM_IcyAlert/main.py
