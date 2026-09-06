@@ -49,6 +49,7 @@ def run(carra=False,
         )
     else:
         model = UnetSmall()
+        
     model.to(device)
 
     ddpm.train(model, dataloader, device, timesteps, epochs=epochs, lr=lr)
