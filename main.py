@@ -53,6 +53,6 @@ if __name__ == "__main__":
     run(
         carra=True,
         timesteps=100,
-        batch_size=1,
+        batch_size=2,
         epochs=10,
     )
