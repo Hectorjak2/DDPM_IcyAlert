@@ -11,7 +11,7 @@
 ### -- set walltime limit: hh:mm --  maximum 24 hours for GPU-queues right now
 #BSUB -W 12:00
 # request system memory for 1220x1220 training
-#BSUB -R "rusage[mem=64GB]"
+#BSUB -R "rusage[mem=32GB]"
 #BSUB -R "select[gpu80gb]"
 ### -- set the email address --
 # please uncomment the following line and put in your e-mail address,
