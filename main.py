@@ -38,7 +38,16 @@ def run(carra=False,
 
     #Defining the DDPM model, and the UNET
     ddpm = DDPM(timesteps=timesteps, device=device, image_size=train_ds[0][0].shape[-1])
-    model = Unet(attention_levels=()) if carra else UnetSmall() if fashion else None
+
+    if carra:
+        # Smaller UNet: ~10M params instead of 78.7M
+        model = Unet(
+            base_channels=64,           # Reduced from 128
+            channel_mult=(1, 2, 2, 2),  # Reduced from (1, 2, 2, 2, 4)
+            num_res_blocks=1,           # Reduced from 2
+        )
+    else:
+        model = UnetSmall()
     model.to(device)
 
     ddpm.train(model, dataloader, device, timesteps, epochs=epochs, lr=lr)
@@ -53,6 +62,6 @@ if __name__ == "__main__":
     run(
         carra=True,
         timesteps=100,
-        batch_size=2,
+        batch_size=4,
         epochs=10,
     )
