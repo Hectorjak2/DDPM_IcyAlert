@@ -45,6 +45,7 @@ def run(carra=False,
             base_channels=64,           # Reduced from 128
             channel_mult=(1, 2, 2, 2),  # Reduced from (1, 2, 2, 2, 4)
             num_res_blocks=1,           # Reduced from 2
+            attention_levels=()         # No attention
         )
     else:
         model = UnetSmall()
@@ -62,6 +63,6 @@ if __name__ == "__main__":
     run(
         carra=True,
         timesteps=100,
-        batch_size=4,
+        batch_size=1,
         epochs=10,
     )
