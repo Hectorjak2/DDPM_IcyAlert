@@ -5,14 +5,14 @@
 ### -- set the job Name --
 #BSUB -J Bachelor
 ### -- ask for number of cores (default: 1) --
-#BSUB -n 4
+#BSUB -n 8
 ### -- Select the resources: 1 gpu in exclusive process mode --
 #BSUB -gpu "num=1:mode=exclusive_process"
 ### -- set walltime limit: hh:mm --  maximum 24 hours for GPU-queues right now
-#BSUB -W 3:00
-# request 5GB of system-memory
-#BSUB -R "rusage[mem=8GB]"
-#BSUB -R "select[gpu40gb]"
+#BSUB -W 12:00
+# request system memory for 1220x1220 training
+#BSUB -R "rusage[mem=128GB]"
+#BSUB -R "select[gpu80gb]"
 ### -- set the email address --
 # please uncomment the following line and put in your e-mail address,
 # if you want to receive e-mail notifications on a non-default address

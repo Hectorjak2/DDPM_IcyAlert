@@ -30,7 +30,7 @@ def run(carra=False,
 
     #Defining the dataset and dataloader
     if carra: 
-        train_ds = CARRA2("siconc", device, TEST=True, batch_dim=False)
+        train_ds = CARRA2("siconc", device, batch_dim=False)
     elif fashion:
         train_ds = FashionMNIST(train=True, device=device, batch_dim=False)
 
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     # Run the training
     run(
         carra=True,
-        timesteps=200,
-        batch_size=16,
-        epochs=20,
+        timesteps=100,
+        batch_size=1,
+        epochs=10,
     )
