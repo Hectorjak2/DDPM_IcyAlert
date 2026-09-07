@@ -1,8 +1,8 @@
 import torch
-import matplotlib.pyplot as plt
-import argparse
+import pickle
 
-from utils import CARRA2, FashionMNIST, visualize_sample, download_carra2_monthly_data
+from tqdm import tqdm
+from utils import CARRA2, FashionMNIST, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
 from models.ddpm import DDPM
 from models.unet import Unet, UnetSmall
@@ -15,7 +15,7 @@ def run(carra=False,
          epochs=100,
          lr=1e-3,
          download_carra2_data=False
-         ):
+         ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
     
     if not carra and not fashion:
         raise ValueError("Please specify a dataset to use: CARRA2 or FashionMNIST")
@@ -47,25 +47,34 @@ def run(carra=False,
             num_res_blocks=1,           # Reduced from 2
             attention_levels=()         # No attention
         )
-    else:
+    elif fashion:
         model = UnetSmall()
 
-    model.to(device)
-
+    print("Training the model... ")
     ddpm.train(model, dataloader, device, timesteps, epochs=epochs, lr=lr)
 
-    #Sample and plot 
-    #sample = ddpm.sample(model)
-    #land_mask = torch.isfinite(train_ds[0][0].cpu())
-    #visualize_sample(sample, finite_mask=land_mask)
+    return model, ddpm, train_ds
+
+def download_samples(ddpm: DDPM, n_of_samples: int = 10): 
+    print("Sampling from the trained model ...")
+    samples = []
+    for i in tqdm(range(n_of_samples)): 
+        sample = ddpm.sample(model)
+        samples.append(sample)
+
+    pickle.dump(samples, open(f"results/{ddpm.output_name}/samples.pkl", "wb"))
+
 
 if __name__ == "__main__":
     # Run the training
     print("The python script is running ...")
     
-    run(
+    model, ddpm, train_ds = run(
         carra=True,
-        timesteps=100,
-        batch_size=1,
-        epochs=10,
+        timesteps=1000,
+        batch_size=2,
+        epochs=2,
     )
+
+    #Sampling from the trained model 
+    download_samples(ddpm, n_of_samples=10)

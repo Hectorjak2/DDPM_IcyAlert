@@ -10,6 +10,7 @@ class DDPM:
         self.timesteps = timesteps
         self.device = device
         self.image_size = image_size
+        self.output_name = "" # Initialize output_name to an empty string
 
     def beta_schedule(self, timesteps, start=0.0001, end=0.02):
         """
@@ -118,16 +119,18 @@ class DDPM:
         return xt
 
     def train(self, model, dataloader, device: str, timesteps: int, epochs: int, lr: float = 1e-3): 
+        self.output_name = f"{model._get_name()}_{dataloader.dataset.name}"
+
         n_params = sum(p.numel() for p in model.parameters())
         print(f"parameters: {n_params / 1e6:.1f}M")
-        os.makedirs("checkpoints", exist_ok=True)
+        os.makedirs(f"results/{self.output_name}", exist_ok=True)
 
         model.to(device)
         optimizer = Adam(model.parameters(), lr=lr)
 
         for epoch in range(epochs):
             if epoch % 10 == 0 and epoch > 0: 
-                model.save_checkpoint(f"checkpoints/model_epoch_{epoch}.pth", 
+                model.save_checkpoint(f"results/{self.output_name}/model_epoch_{epoch}.pth", 
                                     optimizer=optimizer, 
                                     epoch=epoch)
                             
@@ -146,22 +149,6 @@ class DDPM:
                 loss.backward()
                 optimizer.step() 
 
-        model.save_weights(f"checkpoints/model_final_t{timesteps}_epochs{epochs}_.pth")
+        model.save_weights(f"results/{self.output_name}/model_final_batchsize{dataloader.batch_size}_t{timesteps}_epochs{epochs}_lr{lr}.pth")
 
 
-if __name__ == "__main__":
-    """model = Unet()
-    optimizer = torch.optim.Adam(model.parameters())
-
-    # Save during training
-    if epoch % 10 == 0:
-        model.save_checkpoint("checkpoints/model_epoch_{epoch}.pth", 
-                            optimizer=optimizer, 
-                            epoch=epoch, 
-                            loss=current_loss)
-
-    # Resume training
-    metadata = model.load_checkpoint("checkpoints/model_epoch_50.pth", 
-                                    optimizer=optimizer, 
-                                    device="cuda")
-    start_epoch = metadata["epoch"] + 1"""

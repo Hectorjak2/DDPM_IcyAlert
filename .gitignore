@@ -2,3 +2,5 @@
 data
 .claude
 *.pth
+results
+*.pkl

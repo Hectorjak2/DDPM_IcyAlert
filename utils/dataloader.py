@@ -4,6 +4,8 @@ import xarray as xr
 from torchvision import datasets, transforms
 
 allowed_variables = ["siconc"]
+CARRA_WEST_MASK = None
+CARRA_TEST_MASK = None
 
 class CARRA2(Dataset):
     def __init__(self, selected_variable: str, device: str, time_slice: slice | None = None, WEST: bool = True, TEST: bool = False, batch_dim: bool = True):
@@ -22,6 +24,8 @@ class CARRA2(Dataset):
         """
         self.batch_dim = batch_dim
         self.device = device
+        self.name = f"CARRA2-{selected_variable}"  # Add this
+
 
         if selected_variable not in allowed_variables:
             raise ValueError(f"{selected_variable} not in {allowed_variables}")
@@ -66,6 +70,8 @@ class FashionMNIST(Dataset):
         """
         self.batch_dim = batch_dim
         self.device = device
+        self.name = f"FashionMNIST-{'train' if train else 'test'}"  # Add this
+
 
         # Define transforms to convert images to tensors
         transform = transforms.Compose([transforms.ToTensor()])
@@ -86,5 +92,4 @@ class FashionMNIST(Dataset):
         return img.to(self.device)
 
 if __name__ == "__main__":
-    train_ds = CARRA2("siconc", time_slice=slice("2012-01", "2013-12"))
-    test_ds  = CARRA2("siconc", time_slice=slice("2014-01", "2014-12"))
+    train_ds = CARRA2("siconc", "mps", batch_dim=False)
