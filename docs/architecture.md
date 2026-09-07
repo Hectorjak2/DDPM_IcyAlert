@@ -78,6 +78,36 @@ Without the clamp this is algebraically identical to the previous direct form `1
 
 Also fixed here: noise was previously added whenever `t > 1`, so the final step was stochastic. It is now `t > 0`, making the last step deterministic as intended.
 
+### Noise Schedule: Shifted Cosine, Resolution-Aware
+
+**Location:** [models/ddpm.py](../models/ddpm.py) `build_schedule()`, [config.py](../config.py) `DDPMConfig`.
+
+**The linear schedule does not destroy large-scale structure at 1216×1216.** DDPM sampling starts from `x_T ~ N(0,I)`, which is valid only if `q(x_T)` is genuinely close to `N(0,I)`. Noise is i.i.d. per pixel, so averaging `x_t` over a `k×k` block cuts the noise std by `k` while a spatially smooth `x_0` keeps its magnitude — the amplitude SNR at scale `k` is `sqrt(ᾱ/(1-ᾱ))·k`. Under `β = 1e-4 → 0.02` at t=999:
+
+| pooling scale k | 1 | 16 | 64 | 152 (bottleneck) | 1216 (domain) |
+|---|---|---|---|---|---|
+| analytic SNR | 0.006 | 0.10 | 0.41 | 0.97 | **7.73** |
+| measured corr(pool(x_T), pool(x_0)) | 0.005 | 0.07 | **0.26** | **0.50** | **0.73** |
+
+(measured over 96 real fields × 5 noise seeds; see `utils/check_schedule.py`)
+
+So `x_999` still reports which field it came from. The network reads the global layout off its input at every `t` and is never required to generate one — the bottleneck `AttentionBlock` sits at 152×152, exactly the scale where SNR ≈ 1. At sampling time `x_T` is a true `N(0,I)` draw, pooling it gives ≈0, and the field collapses to the prior mean. This is the measured failure: samples had mean 0.52 over water (= 0.0 in model range) against a data mean of 0.271, spatial std 0.074 against ~0.40, and 0.00002% of water pixels near zero against 62%.
+
+**The leak grows with linear image size** — 0.41 at 64², 7.73 at 1216² — which is why an absolute `β` range does not transfer between resolutions. (Chen 2023, *On the Importance of Noise Scheduling*; Hoogeboom et al., *simple diffusion*.)
+
+The schedule is now defined on `ᾱ` rather than on `β`: a cosine schedule (Nichol & Dhariwal) whose log-SNR is shifted down by `2·log(shift_ref_resolution / image_size)`, with `β` recovered as `1 - ᾱ_t/ᾱ_{t-1}` clamped to ≤0.999 and `ᾱ` then **recomputed from the clamped β** so the two stay mutually consistent. Measured: domain-scale SNR 7.73 → 0.0032, and the number of steps that actually destroy 64px-scale structure rises from 94/1000 to 186/1000.
+
+Two things to know:
+
+- **Plain cosine is not the fix.** It closes the endpoint leak but holds `ᾱ` high for most of the trajectory and crashes at the end, leaving only 11/1000 such steps — worse than linear's 94. The *shift* is the operative part. `ref=64` is the *simple diffusion* prescription; `ref=128` is the conservative fallback.
+- **`β` is non-monotone under this schedule, by design.** It is U-shaped: ~0.030 at t=25, a minimum of ~0.0062 at t=494, rising to the clamp at t=T. A constant log-SNR shift leaves `dλ/dt` unchanged but moves the point where `ᾱ = 0.5` much earlier, and `β ≈ -(1-σ(λ))·dλ/dt` is large at both ends of the cosine's steep log-SNR curve. Monotone `β` is a convention of the linear/plain-cosine schedules, not a requirement — the derivation needs only `0 < β < 1`, `ᾱ` strictly decreasing, and non-negative posterior variance.
+
+**The clamp in `p_sample` is load-bearing for this schedule.** The shift drives `ᾱ_T` to 6.7e-12, so recovering `x̂₀` divides by as little as 2.6e-6. The quantity that matters is the end-to-end sensitivity `posterior_mean_coef_x0 × 1/sqrt(ᾱ)`, which stays ≤0.04 at every `t` except t=999 where it is 31.6 — and there the `clamp(-1,1)` bounds the contribution to `coef_x0 × 1 = 8e-5`. Without the clamp this schedule would require v-prediction. Do not remove it.
+
+**Schedule construction is float64**, cast to float32 only at the end, including the posterior coefficients. All of them divide by `1 - ᾱ`, which at small `t` subtracts two nearly equal numbers; in float32 that cancellation made `posterior_mean_coef_x0[0]` come out as 0.999834 instead of exactly 1.0. It is now 1.000000.
+
+`utils/check_schedule.py` verifies both the invariants and the leakage empirically. Note that the domain-scale row has a standard error of roughly `1/sqrt(n_fields)` — with too few fields it swings by ±0.4 and is not interpretable, and the fields must span the seasonal cycle or there is no between-field variance for the correlation to detect.
+
 ### Per-Timestep Loss Reporting
 
 **Location:** [models/ddpm.py](../models/ddpm.py) `train()`.
@@ -87,6 +117,16 @@ Also fixed here: noise was previously added whenever `t > 1`, so the final step 
 Measured on the 2-epoch run, per timestep: 0.45 at t=5, 0.042 at t=150, 0.0095 at t=500, 0.0045 at t=900. The scalar "loss ≈ 0.0075" that looked like convergence was just the high-t bucket; the low-t regime that actually generates structure was no better than predicting zero.
 
 `train()` therefore accumulates loss into 5 timestep buckets and prints a per-bucket summary each epoch. Watch the low-t buckets; a healthy run flattens the profile.
+
+**Caveat after the shifted-cosine change — the ε-loss became *less* informative, not more.** The shortcut available to the network is `ε̂ = x_t`, whose MSE is approximately `ᾱ_t · E[x_0²]`. Since the shifted schedule has lower `ᾱ` at every `t`, that shortcut gets cheaper everywhere:
+
+| bucket | linear | shifted cosine |
+|---|---|---|
+| t[0–199] | 5.34e-01 | 1.23e-01 |
+| t[400–599] | 5.43e-02 | 1.75e-03 |
+| t[800–999] | 2.63e-04 | 5.66e-05 |
+
+So bucket losses will drop across the board after the schedule change **for reasons unrelated to sample quality**. Do not read that as improvement. This is a general property of ε-prediction at low SNR and is the main argument for moving to v-prediction, whose loss is naturally SNR-balanced. Until then, the only trustworthy signal is sample statistics compared against the data: mean over water (0.271), spatial std (~0.40), fraction of water pixels below 0.05 (62%), and pairwise correlation between samples.
 
 ### UNet Downsizing for CARRA2
 

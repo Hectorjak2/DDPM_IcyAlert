@@ -46,6 +46,14 @@ def run(carra=False,
         device=device,
         image_size=train_ds[0][0].shape[-1],
         land_mask=train_ds.finite_mask,
+        schedule=DDPMConfig.schedule,
+        shift_ref_resolution=DDPMConfig.shift_ref_resolution,
+    )
+    print(
+        f"Noise schedule: {ddpm.schedule} "
+        f"(image_size={ddpm.image_size}, ref={ddpm.shift_ref_resolution}) -- "
+        f"sqrt(alpha_bar) at t=0: {ddpm.alphas_bar[0].sqrt():.4f}, "
+        f"t=T: {ddpm.alphas_bar[-1].sqrt():.3e}"
     )
 
     if carra:
@@ -80,7 +88,8 @@ def download_samples(ddpm: DDPM, model, n_of_samples: int = 10):
         sample = ddpm.sample(model)
         samples.append(sample.cpu())
 
-    pickle.dump(samples, open(f"results/{ddpm.output_name}/samples.pkl", "wb"))
+        #dump the samples after each iteration
+        pickle.dump(samples, open(f"results/{ddpm.output_name}/samples.pkl", "wb"))
 
 
 if __name__ == "__main__":
@@ -90,10 +99,10 @@ if __name__ == "__main__":
     # Use a config preset; edit config.py to adjust default values.
     # SMOKE_TEST: quick local sanity check (batch_size=2, epochs=2)
     # HPC_RUN: full CARRA2 training (batch_size=16, epochs=100)
-    train_cfg = HPC_RUN
+    train_cfg = SMOKE_TEST
 
     model, ddpm, train_ds = run(
-        carra=True,
+        fashion=True,
         timesteps=train_cfg.timesteps if hasattr(train_cfg, 'timesteps') else DDPMConfig.timesteps,
         batch_size=train_cfg.batch_size,
         epochs=train_cfg.epochs,
@@ -101,4 +110,4 @@ if __name__ == "__main__":
     )
 
     # Sampling from the trained model (download_samples calls model.eval() itself)
-    download_samples(ddpm, model, n_of_samples=10)
+    download_samples(ddpm, model, n_of_samples=1)

@@ -63,5 +63,6 @@ Hyperparameters (formerly scattered) are centralized in [config.py](config.py) a
 ## Conventions
 
 - **Commit messages are not a reliable source of "why"** — they are sparse/non-descriptive. Design rationale lives in [docs/architecture.md](docs/architecture.md) (stable facts) or your personal Claude memory (in-flight decisions, rejected alternatives). When you make a design decision, update [docs/architecture.md](docs/architecture.md) so the next session knows why.
+- **Session-by-session reasoning lives in [docs/diaries/](docs/diaries/)** — theory worked through, alternatives rejected, decisions deliberately deferred. Written by the `/diary` skill ([.claude/skills/diary/SKILL.md](.claude/skills/diary/SKILL.md)), which **only the user invokes** — never write a diary entry on your own initiative. Read the most recent entries when picking up in-flight work; [docs/architecture.md](docs/architecture.md) remains the home for stable facts.
 - **Keep hyperparameters in [config.py](config.py)** — it's the single source of truth for what runs, and makes changes diffable.
 - **When architecture changes, update [docs/architecture.md](docs/architecture.md)** — the module map, design decisions, and reasoning. Don't let that knowledge evaporate.

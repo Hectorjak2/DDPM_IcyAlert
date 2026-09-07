@@ -1,3 +1,4 @@
+import math
 import os
 from random import sample
 
@@ -11,41 +12,37 @@ from utils.dataloader import to_data_range
 
 class DDPM:
     def __init__(self, timesteps: int = 1000, device: str = "mps", image_size: int = 128,
-                 land_mask: torch.Tensor = None):
+                 land_mask: torch.Tensor = None, schedule: str = None,
+                 shift_ref_resolution: int = None):
         """
         Args:
             timesteps: number of diffusion steps T.
             device: torch device string.
-            image_size: spatial size used by ``sample()`` when no land mask is given.
+            image_size: spatial size used by ``sample()`` when no land mask is given, and
+                the resolution the noise schedule is shifted for. Must be set before the
+                schedule is built.
             land_mask: optional static water/land mask of shape [1, H, W] or [1, 1, H, W]
                 with 1.0 = water, 0.0 = land. When given it is fed to the model as a
                 second input channel (so the network can tell land from open water,
                 which are otherwise both encoded as a valid concentration) and used to
                 mask land back to NaN in the generated samples.
+            schedule: ``"shifted_cosine"`` or ``"linear"``; defaults to ``DDPMConfig``.
+            shift_ref_resolution: reference resolution for the log-SNR shift; defaults to
+                ``DDPMConfig``. Ignored by the linear schedule.
         """
         self.timesteps = timesteps
         self.device = device
+        # Assigned before the schedule is built: the shift depends on it.
         self.image_size = image_size
+        self.schedule = schedule if schedule is not None else DDPMConfig.schedule
+        self.shift_ref_resolution = (
+            shift_ref_resolution if shift_ref_resolution is not None
+            else DDPMConfig.shift_ref_resolution
+        )
         self.output_name = "" # Initialize output_name to an empty string
 
-        # Diffusion schedule. Precomputed once here rather than rebuilt on every
-        # q_sample/p_sample call (which cost a linspace + cumprod per reverse step).
-        self.betas = self.beta_schedule(timesteps)
-        self.alphas, self.alphas_bar = self.get_alphas(self.betas)
-
-        # alpha_bar_{t-1}, with alpha_bar_{-1} = 1 so the t=0 posterior reduces to x0.
-        self.alphas_bar_prev = torch.cat(
-            [torch.ones(1, device=self.device), self.alphas_bar[:-1]]
-        )
-        # Coefficients of the posterior q(x_{t-1} | x_t, x_0), see Ho et al. eq. (7).
-        self.posterior_mean_coef_x0 = (
-            self.betas * torch.sqrt(self.alphas_bar_prev) / (1.0 - self.alphas_bar)
-        )
-        self.posterior_mean_coef_xt = (
-            (1.0 - self.alphas_bar_prev) * torch.sqrt(self.alphas) / (1.0 - self.alphas_bar)
-        )
-        self.posterior_variance = self.betas * (1.0 - self.alphas_bar_prev) / (1.0 - self.alphas_bar)
-
+        # The land mask is resolved first: it is the authority on the field size, and the
+        # noise schedule is shifted for that size.
         if land_mask is not None:
             land_mask = land_mask.to(self.device).float()
             while land_mask.dim() < 4:
@@ -53,37 +50,90 @@ class DDPM:
             # Match the [-1, 1] scale of the image channel: +1 water, -1 land.
             self.mask_channel = land_mask * 2.0 - 1.0
             self.water_mask = land_mask.bool()
+            self.image_size = max(land_mask.shape[-2:])
         else:
             self.mask_channel = None
             self.water_mask = None
 
-    def beta_schedule(self, timesteps, start=None, end=None):
+        # Diffusion schedule. Precomputed once here rather than rebuilt on every
+        # q_sample/p_sample call (which cost a linspace + cumprod per reverse step).
+        #
+        # Everything below is derived in float64 and cast to float32 only at the end.
+        # The posterior coefficients all divide by (1 - alpha_bar), which at small t is a
+        # subtraction of two nearly equal numbers: in float32 that cancellation is what
+        # made posterior_mean_coef_x0[0] come out as 0.999834 instead of exactly 1.0.
+        betas, alphas, alphas_bar = self.build_schedule(timesteps)
+
+        # alpha_bar_{t-1}, with alpha_bar_{-1} = 1 so the t=0 posterior reduces to x0.
+        alphas_bar_prev = torch.cat([torch.ones(1, dtype=torch.float64), alphas_bar[:-1]])
+
+        # Coefficients of the posterior q(x_{t-1} | x_t, x_0), see Ho et al. eq. (7).
+        one_minus_alphas_bar = 1.0 - alphas_bar
+        posterior_mean_coef_x0 = betas * torch.sqrt(alphas_bar_prev) / one_minus_alphas_bar
+        posterior_mean_coef_xt = (
+            (1.0 - alphas_bar_prev) * torch.sqrt(alphas) / one_minus_alphas_bar
+        )
+        posterior_variance = betas * (1.0 - alphas_bar_prev) / one_minus_alphas_bar
+
+        for name, tensor in (
+            ("betas", betas),
+            ("alphas", alphas),
+            ("alphas_bar", alphas_bar),
+            ("alphas_bar_prev", alphas_bar_prev),
+            ("posterior_mean_coef_x0", posterior_mean_coef_x0),
+            ("posterior_mean_coef_xt", posterior_mean_coef_xt),
+            ("posterior_variance", posterior_variance),
+        ):
+            setattr(self, name, tensor.float().to(self.device))
+
+    def build_schedule(self, timesteps: int):
+        """Build the diffusion schedule, returning ``(betas, alphas, alphas_bar)``.
+
+        The schedule is defined on ``alpha_bar`` rather than on ``betas``, because the
+        quantity that actually matters -- how much of x0 survives to step t, at each
+        spatial scale -- is a statement about alpha_bar. betas are then recovered from it.
+
+        Returned in float64 on the CPU; ``__init__`` derives the posterior coefficients
+        from these and casts everything to float32 at the end.
         """
-        Linear schedule for beta values.
+        if self.schedule == "linear":
+            betas = torch.linspace(
+                DDPMConfig.beta_start, DDPMConfig.beta_end, timesteps, dtype=torch.float64
+            )
+        elif self.schedule == "shifted_cosine":
+            alphas_bar = self._cosine_alphas_bar(timesteps)
 
-        Args:
-            timesteps: number of diffusion steps.
-            start: beta start value (default from DDPMConfig).
-            end: beta end value (default from DDPMConfig).
+            # Shift the whole log-SNR curve down by 2*log(ref/d). Averaging x_t over a
+            # k x k block cuts the i.i.d. noise std by k while leaving a smooth x0
+            # intact, so the SNR at scale k is sqrt(abar/(1-abar)) * k -- it grows with
+            # image size. Shifting by the size ratio cancels exactly that growth, which
+            # is what keeps q(x_T) close to N(0, I) at every scale up to the full domain.
+            shift = 2.0 * math.log(self.shift_ref_resolution / self.image_size)
+            log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
+            alphas_bar = torch.sigmoid(log_snr)
 
-        Returns a tensor of shape (timesteps,) with linearly spaced values from start to end.
-        """
-        if start is None:
-            start = DDPMConfig.beta_start
-        if end is None:
-            end = DDPMConfig.beta_end
-        return torch.linspace(start, end, timesteps).to(self.device)
+            # betas from the ratio of consecutive alpha_bar, with alpha_bar_{-1} = 1.
+            alphas_bar_prev = torch.cat([torch.ones(1, dtype=torch.float64), alphas_bar[:-1]])
+            betas = (1.0 - alphas_bar / alphas_bar_prev).clamp(0.0, 0.999)
+        else:
+            raise ValueError(
+                f"unknown schedule {self.schedule!r}; expected 'shifted_cosine' or 'linear'"
+            )
 
-    def get_alphas(self, betas: torch.Tensor):
-        """
-        Compute alpha and alpha_bar from beta values.
+        # Recompute alpha_bar from the (possibly clamped) betas rather than reusing the
+        # analytic one, so betas, alphas and alphas_bar are mutually consistent and the
+        # posterior identities below hold exactly.
+        alphas = 1.0 - betas
+        alphas_bar = torch.cumprod(alphas, dim=0)
 
-        Returns two tensors: alphas and alphas_bar both of shape (timesteps,).
-        """
-        alphas = (1.0 - betas).to(self.device)
-        alphas_bar = torch.cumprod(alphas, dim=0).to(self.device)
+        return betas, alphas, alphas_bar
 
-        return alphas, alphas_bar
+    @staticmethod
+    def _cosine_alphas_bar(timesteps: int, s: float = 0.008) -> torch.Tensor:
+        """Cosine alpha_bar schedule (Nichol & Dhariwal 2021, eq. 17), in float64."""
+        x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
+        f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
+        return (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
 
     def model_input(self, xt: torch.Tensor) -> torch.Tensor:
         """Assemble the network input, appending the static land mask channel if present."""
