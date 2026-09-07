@@ -232,7 +232,7 @@ class DDPM:
 
                 loss = self.compute_loss(model, batch, t)
 
-                print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} (t={t.tolist()})")
+                print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} ")#(t={t.tolist()})")
 
                 bucket = min(int(t.float().mean().item() / timesteps * n_buckets), n_buckets - 1)
                 bucket_sum[bucket] += loss.item()
