@@ -21,7 +21,9 @@ class UnetConfig:
     ~10M params instead of the Unet class's own defaults (~78.7M).
     See docs/architecture.md for rationale.
     """
-    in_channels: int = 1
+    # 2 input channels: the noised SIC field plus the static land/sea mask, so the
+    # network can tell land from open water. Output is just the predicted noise.
+    in_channels: int = 2
     out_channels: int = 1
     base_channels: int = 64          # Reduced from 128
     channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)

@@ -38,13 +38,23 @@ def run(carra=False,
     dataloader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 
     #Defining the DDPM model, and the UNET
-    ddpm = DDPM(timesteps=timesteps, device=device, image_size=train_ds[0][0].shape[-1])
+    # The static land mask is fed to the network as an extra input channel, so the
+    # model can distinguish land from open water (both otherwise look like a valid
+    # concentration) and land can be masked back out of the generated samples.
+    ddpm = DDPM(
+        timesteps=timesteps,
+        device=device,
+        image_size=train_ds[0][0].shape[-1],
+        land_mask=train_ds.finite_mask,
+    )
 
     if carra:
         # Build UNet from config (see config.py for the downsized CARRA2 config).
         # ~10M params instead of 78.7M; see docs/architecture.md for rationale.
         unet_cfg = UnetConfig()
         model = Unet(
+            in_channels=unet_cfg.in_channels,
+            out_channels=unet_cfg.out_channels,
             base_channels=unet_cfg.base_channels,
             channel_mult=unet_cfg.channel_mult,
             num_res_blocks=unet_cfg.num_res_blocks,
@@ -62,6 +72,9 @@ def run(carra=False,
 
 def download_samples(ddpm: DDPM, model, n_of_samples: int = 10):
     print("Sampling from the trained model ...")
+    # Disable dropout for inference. Left in train mode the residual blocks inject
+    # noise at every one of the T reverse steps, which wrecks the sample.
+    model.eval()
     samples = []
     for i in tqdm(range(n_of_samples)):
         sample = ddpm.sample(model)
@@ -87,5 +100,5 @@ if __name__ == "__main__":
         lr=train_cfg.lr,
     )
 
-    # Sampling from the trained model
+    # Sampling from the trained model (download_samples calls model.eval() itself)
     download_samples(ddpm, model, n_of_samples=10)

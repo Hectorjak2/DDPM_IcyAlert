@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 import xarray as xr
@@ -6,6 +7,16 @@ from torchvision import datasets, transforms
 allowed_variables = ["siconc"]
 CARRA_WEST_MASK = None
 CARRA_TEST_MASK = None
+
+
+def to_model_range(x: torch.Tensor) -> torch.Tensor:
+    """Map data in [0, 1] to the [-1, 1] range the diffusion process assumes."""
+    return x * 2.0 - 1.0
+
+
+def to_data_range(x: torch.Tensor) -> torch.Tensor:
+    """Inverse of :func:`to_model_range`: map [-1, 1] back to [0, 1]."""
+    return (x + 1.0) / 2.0
 
 class CARRA2(Dataset):
     def __init__(self, selected_variable: str, device: str, time_slice: slice | None = None, WEST: bool = True, TEST: bool = False, batch_dim: bool = True):
@@ -45,12 +56,24 @@ class CARRA2(Dataset):
         else:
             self.da = da
 
+        # The land/sea geometry is static in CARRA2, so derive the mask once from
+        # the first time step instead of recomputing it per sample. Stored as
+        # [1, H, W] float with 1.0 = water, 0.0 = land.
+        first = self.da.isel(time=0).values
+        self.finite_mask = (
+            torch.from_numpy(np.isfinite(first)).float().unsqueeze(0).to(device)
+        )
+
     def __len__(self):
         return self.da.sizes["time"]
 
     def __getitem__(self, idx):
         arr = self.da.isel(time=idx).values
         t = torch.from_numpy(arr).float().unsqueeze(0)  # [1, H, W]
+        # siconc is a fraction in [0, 1]; the diffusion process assumes roughly
+        # zero-mean unit-scale data, so shift to [-1, 1]. NaN (land) stays NaN and
+        # is handled by the loss mask.
+        t = to_model_range(t)
         if self.batch_dim:
             t = t.unsqueeze(0)  # [1, 1, H, W]
         return t.to(self.device)
@@ -71,6 +94,7 @@ class FashionMNIST(Dataset):
         self.batch_dim = batch_dim
         self.device = device
         self.name = f"FashionMNIST-{'train' if train else 'test'}"  # Add this
+        self.finite_mask = None  # No land/sea geometry for this toy dataset
 
 
         # Define transforms to convert images to tensors
@@ -86,7 +110,8 @@ class FashionMNIST(Dataset):
 
     def __getitem__(self, idx):
         img, label = self.data[idx]
-        # img is already [1, 28, 28] from ToTensor()
+        # img is already [1, 28, 28] from ToTensor(), i.e. in [0, 1] -> shift to [-1, 1]
+        img = to_model_range(img)
         if self.batch_dim:
             img = img.unsqueeze(0)  # [1, 1, 28, 28]
         return img.to(self.device)
