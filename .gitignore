@@ -1,6 +1,6 @@
 .venv
 data
-.claude
+.claude/settings.local.json
 *.pth
 results
 *.pkl

@@ -5,6 +5,9 @@ import torch
 from torch.optim import Adam
 import torch.nn.functional as F
 
+from config import DDPMConfig
+
+
 class DDPM:
     def __init__(self, timesteps: int = 1000, device: str = "mps", image_size: int = 128):
         self.timesteps = timesteps
@@ -12,12 +15,21 @@ class DDPM:
         self.image_size = image_size
         self.output_name = "" # Initialize output_name to an empty string
 
-    def beta_schedule(self, timesteps, start=0.0001, end=0.02):
+    def beta_schedule(self, timesteps, start=None, end=None):
         """
         Linear schedule for beta values.
 
+        Args:
+            timesteps: number of diffusion steps.
+            start: beta start value (default from DDPMConfig).
+            end: beta end value (default from DDPMConfig).
+
         Returns a tensor of shape (timesteps,) with linearly spaced values from start to end.
         """
+        if start is None:
+            start = DDPMConfig.beta_start
+        if end is None:
+            end = DDPMConfig.beta_end
         return torch.linspace(start, end, timesteps).to(self.device)
 
     def get_alphas(self, betas: torch.Tensor): 

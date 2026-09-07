@@ -153,6 +153,6 @@ def plot_samples_grid(
 if __name__ == "__main__":
     import os 
     os.chdir("..")
+    finite_mask = torch.load("data/finite_WEST.pt")
 
-
-    plot_samples_grid("results/UnetSmall_FashionMNIST-train/samples.pkl", "fashion", grid_size=5)
+    plot_samples_grid("results/Unet_CARRA2-siconc/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)

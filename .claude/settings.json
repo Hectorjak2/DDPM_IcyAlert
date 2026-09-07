@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git *)"
+    ],
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import cartopy; print\\(cartopy.__version__\\)\")"
+    ]
+  }
+}

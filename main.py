@@ -6,6 +6,7 @@ from utils import CARRA2, FashionMNIST, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
 from models.ddpm import DDPM
 from models.unet import Unet, UnetSmall
+from config import UnetConfig, DDPMConfig, TrainConfig, SMOKE_TEST, HPC_RUN
 
 def run(carra=False, 
          fashion=False, 
@@ -40,12 +41,16 @@ def run(carra=False,
     ddpm = DDPM(timesteps=timesteps, device=device, image_size=train_ds[0][0].shape[-1])
 
     if carra:
-        # Smaller UNet: ~10M params instead of 78.7M
+        # Build UNet from config (see config.py for the downsized CARRA2 config).
+        # ~10M params instead of 78.7M; see docs/architecture.md for rationale.
+        unet_cfg = UnetConfig()
         model = Unet(
-            base_channels=64,           # Reduced from 128
-            channel_mult=(1, 2, 2, 2),  # Reduced from (1, 2, 2, 2, 4)
-            num_res_blocks=1,           # Reduced from 2
-            attention_levels=()         # No attention
+            base_channels=unet_cfg.base_channels,
+            channel_mult=unet_cfg.channel_mult,
+            num_res_blocks=unet_cfg.num_res_blocks,
+            attention_levels=unet_cfg.attention_levels,
+            dropout=unet_cfg.dropout,
+            groups=unet_cfg.groups,
         )
     elif fashion:
         model = UnetSmall()
@@ -55,12 +60,12 @@ def run(carra=False,
 
     return model, ddpm, train_ds
 
-def download_samples(ddpm: DDPM, n_of_samples: int = 10): 
+def download_samples(ddpm: DDPM, model, n_of_samples: int = 10):
     print("Sampling from the trained model ...")
     samples = []
-    for i in tqdm(range(n_of_samples)): 
+    for i in tqdm(range(n_of_samples)):
         sample = ddpm.sample(model)
-        samples.append(sample)
+        samples.append(sample.cpu())
 
     pickle.dump(samples, open(f"results/{ddpm.output_name}/samples.pkl", "wb"))
 
@@ -68,13 +73,19 @@ def download_samples(ddpm: DDPM, n_of_samples: int = 10):
 if __name__ == "__main__":
     # Run the training
     print("The python script is running ...")
-    
+
+    # Use a config preset; edit config.py to adjust default values.
+    # SMOKE_TEST: quick local sanity check (batch_size=2, epochs=2)
+    # HPC_RUN: full CARRA2 training (batch_size=16, epochs=100)
+    train_cfg = HPC_RUN
+
     model, ddpm, train_ds = run(
         carra=True,
-        timesteps=1000,
-        batch_size=2,
-        epochs=2,
+        timesteps=train_cfg.timesteps if hasattr(train_cfg, 'timesteps') else DDPMConfig.timesteps,
+        batch_size=train_cfg.batch_size,
+        epochs=train_cfg.epochs,
+        lr=train_cfg.lr,
     )
 
-    #Sampling from the trained model 
-    download_samples(ddpm, n_of_samples=10)
+    # Sampling from the trained model
+    download_samples(ddpm, model, n_of_samples=10)
