@@ -246,12 +246,12 @@ class DDPM:
 
         return xt
 
-    def train(self, model, dataloader, device: str, timesteps: int, epochs: int, lr: float = 1e-3): 
+    def train(self, model, dataloader, experiment_name: str, device: str, timesteps: int, epochs: int, lr: float = 1e-3): 
         self.output_name = f"{model._get_name()}_{dataloader.dataset.name}"
 
         n_params = sum(p.numel() for p in model.parameters())
         print(f"parameters: {n_params / 1e6:.1f}M")
-        os.makedirs(f"results/{self.output_name}", exist_ok=True)
+        os.makedirs(f"results/{experiment_name}", exist_ok=True)
 
         model.to(device)
         model.train()
@@ -265,7 +265,7 @@ class DDPM:
         n_buckets = 5
         for epoch in range(epochs):
             if epoch % 10 == 0 and epoch > 0:
-                model.save_checkpoint(f"results/{self.output_name}/model_epoch_{epoch}.pth",
+                model.save_checkpoint(f"results/{experiment_name}/model_epoch_{epoch}.pth",
                                     optimizer=optimizer,
                                     epoch=epoch)
 
@@ -299,6 +299,5 @@ class DDPM:
             )
             print(f"Epoch {epoch} loss by timestep bucket -- {summary}")
 
-        model.save_weights(f"results/{self.output_name}/model_final_batchsize{dataloader.batch_size}_t{timesteps}_epochs{epochs}_lr{lr}.pth")
-
+        model.save_weights(f"results/{experiment_name}/final_{self.output_name}_batchsize{dataloader.batch_size}_t{timesteps}_epochs{epochs}_lr{lr}.pth")
 

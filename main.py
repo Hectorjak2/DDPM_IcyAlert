@@ -1,21 +1,21 @@
 import torch
-import pickle
-
-from tqdm import tqdm
 from utils import CARRA2, FashionMNIST, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
+from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary
+
 from models.ddpm import DDPM
 from models.unet import Unet, UnetSmall
-from config import UnetConfig, DDPMConfig, TrainConfig, SMOKE_TEST, HPC_RUN
+from config import UnetConfig, DDPMConfig, TrainConfig 
 
-def run(carra=False, 
+def run(carra=False,
          fashion=False, 
          verbose=True,
          timesteps=100, 
          batch_size=16,
          epochs=100,
          lr=1e-3,
-         download_carra2_data=False
+         download_carra2_data=False,
+         experiment_name="default"
          ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
     
     if not carra and not fashion:
@@ -49,12 +49,7 @@ def run(carra=False,
         schedule=DDPMConfig.schedule,
         shift_ref_resolution=DDPMConfig.shift_ref_resolution,
     )
-    print(
-        f"Noise schedule: {ddpm.schedule} "
-        f"(image_size={ddpm.image_size}, ref={ddpm.shift_ref_resolution}) -- "
-        f"sqrt(alpha_bar) at t=0: {ddpm.alphas_bar[0].sqrt():.4f}, "
-        f"t=T: {ddpm.alphas_bar[-1].sqrt():.3e}"
-    )
+    print(schedule_summary(ddpm))
 
     if carra:
         # Build UNet from config (see config.py for the downsized CARRA2 config).
@@ -74,22 +69,9 @@ def run(carra=False,
         model = UnetSmall()
 
     print("Training the model... ")
-    ddpm.train(model, dataloader, device, timesteps, epochs=epochs, lr=lr)
+    ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
 
     return model, ddpm, train_ds
-
-def download_samples(ddpm: DDPM, model, n_of_samples: int = 10):
-    print("Sampling from the trained model ...")
-    # Disable dropout for inference. Left in train mode the residual blocks inject
-    # noise at every one of the T reverse steps, which wrecks the sample.
-    model.eval()
-    samples = []
-    for i in tqdm(range(n_of_samples)):
-        sample = ddpm.sample(model)
-        samples.append(sample.cpu())
-
-        #dump the samples after each iteration
-        pickle.dump(samples, open(f"results/{ddpm.output_name}/samples.pkl", "wb"))
 
 
 if __name__ == "__main__":
@@ -99,15 +81,20 @@ if __name__ == "__main__":
     # Use a config preset; edit config.py to adjust default values.
     # SMOKE_TEST: quick local sanity check (batch_size=2, epochs=2)
     # HPC_RUN: full CARRA2 training (batch_size=16, epochs=100)
-    train_cfg = SMOKE_TEST
 
     model, ddpm, train_ds = run(
         fashion=True,
-        timesteps=train_cfg.timesteps if hasattr(train_cfg, 'timesteps') else DDPMConfig.timesteps,
-        batch_size=train_cfg.batch_size,
-        epochs=train_cfg.epochs,
-        lr=train_cfg.lr,
+        timesteps=DDPMConfig.timesteps,
+        batch_size=TrainConfig.batch_size,
+        epochs=TrainConfig.epochs,
+        lr=TrainConfig.lr,
+        experiment_name=TrainConfig.experiment_name
     )
 
     # Sampling from the trained model (download_samples calls model.eval() itself)
-    download_samples(ddpm, model, n_of_samples=1)
+    download_samples(ddpm, model, TrainConfig, n_of_samples=1)
+
+    config_path = dump_config_snapshot(TrainConfig, ddpm)
+    print(f"Wrote config snapshot to {config_path}")
+
+    print("SCRIPT DONE")
