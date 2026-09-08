@@ -70,3 +70,49 @@ An "iteration" = a fixed number of runs you commit to before reviewing.
 2. Edit `config.py`, choosing a unique `experiment_name`.
 3. Launch: `./utils/hpc_run.sh <same experiment_name>`.
 4. The dashboard tracks status; the launch blocks until the run reports `SCRIPT DONE`.
+
+## Evaluating samples
+
+The task is **unconditional generation**: we are not matching a sample to a
+specific target field, we are asking whether the *set* of generated fields looks
+like the *set* of real CARRA2 fields. Evaluation is therefore **distributional**.
+
+**Guiding principle — never trust a single scalar.** Two failure modes have
+already fooled point metrics (see `docs/diaries/`): a training loss that
+"converged" while samples were noise, and samples whose *mean* looked plausible
+(~0.52 water) but which were just the prior mean with no spatial structure. Both
+were only caught by looking at the **value distribution** and the **spatial
+structure**, not any one number. Read at least two levels before judging a run.
+
+**The tool:** `utils/evaluate_samples.py` compares a run's `samples.pkl` against
+real fields drawn evenly across the time axis (seasonal cycle matters — an
+all-January subset makes the spatial stats lie). It writes a JSON summary + 3 PNGs
+to `results/<experiment_name>/evaluation/`. Run it with the project venv:
+```
+./.venv/bin/python utils/evaluate_samples.py <experiment_name> [--n-real 96]
+```
+(`--n-real >= 96` is needed for stable spatial statistics.)
+
+**What it reports, and how to read it (all Wasserstein/L1: lower = better):**
+- **Concentration histogram + Wasserstein** — the value distribution over water
+  pixels. Real SIC is strongly **bimodal** (spike at 0 = open water, spike at 1 =
+  full ice). A unimodal blob near the mean is the classic prior-mean collapse.
+  Watch `frac < 0.05`: the model must reproduce open water, not just the average.
+- **Radially-averaged power spectrum (log-log) + `spectrum_log_l1`** — whether
+  structure exists across scales. This is the primary spatial-structure check; a
+  flat or wrong-slope spectrum means the field is noise or over-smooth.
+- **Per-field summaries** (mean conc, ice fraction, within-field spatial std),
+  each with its own Wasserstein — the set-level "does the population look right"
+  check. Near-zero `spatial_std` = flat fields.
+- **Sanity checks** — values in [0,1], and land-mask agreement with the data.
+
+**Mode note.** In **experiment mode** bash is restricted to `./utils/hpc_run.sh`,
+so you cannot run the evaluator there — do the analysis in **normal mode** on the
+run's downloaded `samples.pkl`. Wiring the evaluator into `main.py` to run
+automatically at the end of a run is a pipeline change (out of bounds in
+experiment mode): log it with `record_finding`, don't attempt it.
+
+**First real 1216² run is expected to fail.** With the current undertraining
+(~288 optimizer steps) and the never-before-tested full-resolution schedule, the
+point of evaluating is to make the failure *legible* (which level breaks) rather
+than to declare success.

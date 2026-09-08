@@ -155,4 +155,4 @@ if __name__ == "__main__":
     os.chdir("..")
     finite_mask = torch.load("data/finite_WEST.pt")
 
-    plot_samples_grid("results/Unet_CARRA2-siconc/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
+    plot_samples_grid("results/Auto_exper222/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)

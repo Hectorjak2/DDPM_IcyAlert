@@ -1,10 +1,7 @@
 {
-  "mode": "experiment",
+  "mode": "normal",
   "experiments": [],
   "findings": [],
   "notes": [],
-  "budget": {
-    "total": 5,
-    "startedAt": 1788894301878
-  }
+  "budget": null
 }
