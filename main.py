@@ -92,7 +92,7 @@ if __name__ == "__main__":
     )
 
     # Sampling from the trained model (download_samples calls model.eval() itself)
-    download_samples(ddpm, model, TrainConfig, n_of_samples=1)
+    download_samples(ddpm, model, TrainConfig, TrainConfig.number_of_samples)
 
     config_path = dump_config_snapshot(TrainConfig, ddpm)
     print(f"Wrote config snapshot to {config_path}")

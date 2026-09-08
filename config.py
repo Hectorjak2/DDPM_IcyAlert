@@ -77,4 +77,5 @@ class TrainConfig:
     batch_size: int = 2
     epochs: int = 2
     lr: float = 1e-3
+    number_of_samples: int = 1
 
