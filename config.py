@@ -73,7 +73,7 @@ class TrainConfig:
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
-    experiment_name: str = "long_ep100"
+    experiment_name: str = "long_ep100_v2"
     batch_size: int = 2
     epochs: int = 100
     lr: float = 1e-3
