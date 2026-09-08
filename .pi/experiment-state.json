@@ -3,8 +3,9 @@
   "experiments": [
     {
       "name": "long_ep100",
-      "status": "running",
-      "startedAt": 1788897047395
+      "status": "failed",
+      "startedAt": 1788897047395,
+      "endedAt": 1788897053660
     }
   ],
   "findings": [],

@@ -5,3 +5,4 @@ analysis
 *.pth
 results
 *.pkl
+*.pyc
