@@ -83,7 +83,7 @@ if __name__ == "__main__":
     # HPC_RUN: full CARRA2 training (batch_size=16, epochs=100)
 
     model, ddpm, train_ds = run(
-        fashion=True,
+        carra=True,
         timesteps=DDPMConfig.timesteps,
         batch_size=TrainConfig.batch_size,
         epochs=TrainConfig.epochs,
