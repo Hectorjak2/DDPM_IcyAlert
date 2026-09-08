@@ -18,15 +18,21 @@ An "experiment" = editing `config.py`, then launching a training+sampling run.
 
 ## Hard rules (also enforced deterministically by the experiment-mode extension)
 
-1. **Never run git.** The only allowed bash command is:
+1. **Never run git.** The allowed bash commands are:
    ```
-   ./utils/hpc_run.sh <experiment_name>
+   ./utils/hpc_run.sh <experiment_name>                      # launch a run
+   ./.venv/bin/python utils/evaluate_samples.py <name> [...]  # evaluate a run
+   ./.venv/bin/python analysis/<script>.py [...]             # ad-hoc analysis
    ```
    (The launch script handles git/HPC submission internally — that is not you
-   running git.) Inspect files with the `read`, `grep`, `find`, `ls` tools, not bash.
-2. **Only edit `config.py`.** The `write` tool is disabled; `edit` works only on
-   `config.py`. Every hyperparameter is config-driven (`main.py` consumes
-   `UnetConfig`, `DDPMConfig`, `TrainConfig`), so this is sufficient.
+   running git.) No shell chaining/metacharacters are permitted. Inspect files
+   with the `read`, `grep`, `find`, `ls` tools, not bash.
+2. **Only edit `config.py`** (to change the experiment) **or scratch files under
+   `analysis/`** (temporary evaluation scripts). `write` is allowed only under
+   `analysis/`; `edit` only on `config.py` or `analysis/`. The source pipeline
+   (`main.py`, `models/`, `utils/`) stays read-only. Every hyperparameter is
+   config-driven (`main.py` consumes `UnetConfig`, `DDPMConfig`, `TrainConfig`),
+   so editing `config.py` is sufficient to define a run.
 3. **Name invariant — critical.** Every time you edit `config.py`, set
    `TrainConfig.experiment_name`, and use that **exact same name** as the argument
    to `./utils/hpc_run.sh`. This is how results get filed where you can find them.
@@ -106,11 +112,14 @@ to `results/<experiment_name>/evaluation/`. Run it with the project venv:
   check. Near-zero `spatial_std` = flat fields.
 - **Sanity checks** — values in [0,1], and land-mask agreement with the data.
 
-**Mode note.** In **experiment mode** bash is restricted to `./utils/hpc_run.sh`,
-so you cannot run the evaluator there — do the analysis in **normal mode** on the
-run's downloaded `samples.pkl`. Wiring the evaluator into `main.py` to run
-automatically at the end of a run is a pipeline change (out of bounds in
-experiment mode): log it with `record_finding`, don't attempt it.
+**Mode note.** In **experiment mode** you CAN now run the evaluator and ad-hoc
+analysis between runs: `./.venv/bin/python utils/evaluate_samples.py <name> [...]`
+and `./.venv/bin/python analysis/<script>.py [...]` are allowed, and you may
+`write`/`edit` scratch scripts under `analysis/`. These do NOT count toward the
+experiment budget — only `./utils/hpc_run.sh` launches do. The source pipeline
+stays read-only, so **wiring the evaluator into `main.py`** to run automatically
+at the end of a run is still a pipeline change (out of bounds): log it with
+`record_finding`, don't attempt it.
 
 **First real 1216² run is expected to fail.** With the current undertraining
 (~288 optimizer steps) and the never-before-tested full-resolution schedule, the

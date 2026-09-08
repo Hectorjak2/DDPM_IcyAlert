@@ -9,10 +9,17 @@
  *
  *   • EXPERIMENT mode (YELLOW):
  *       The original thesis guardrails, enforced as code:
- *         1. Bash allowlist: only `./utils/hpc_run.sh <name>`.
- *         2. `write` disabled; `edit` only on config.py.
+ *         1. Bash allowlist: `./utils/hpc_run.sh <name>` (launch), plus a
+ *            READ-ONLY analysis lane — the sample evaluator
+ *            (`./.venv/bin/python utils/evaluate_samples.py ...`) and ad-hoc
+ *            analysis scripts under `analysis/` run through the project venv.
+ *            Shell chaining / metacharacters are rejected in all cases.
+ *         2. `write`/`edit` only on config.py OR scratch files under
+ *            `analysis/` (temporary evaluation scripts). The source pipeline
+ *            (main.py, models/, utils/) stays read-only.
  *         3. Name-match invariant: launch arg must equal config.py's
  *            experiment_name.
+ *       Only launches count toward the budget; evaluation runs are free.
  *       Plus the live dashboard + findings log.
  *
  * Toggle between modes with SHIFT+TAB (or the /mode command).
@@ -29,6 +36,17 @@ import { resolve, dirname, join } from "node:path";
 const LAUNCH_RE = /^\s*\.\/utils\/hpc_run\.sh\s+(\S+)\s*$/;
 // Extract experiment_name from config.py.
 const NAME_RE = /experiment_name\s*:\s*str\s*=\s*["']([^"']+)["']/;
+
+// ---- Analysis lane (experiment mode, read-only w.r.t. the pipeline) --------
+// Scratch directory for temporary evaluation scripts the agent may write/edit.
+const ANALYSIS_DIR = "analysis";
+// Safe argument tail: no shell metacharacters (no ; & | $ ` quotes redirects),
+// so these commands cannot smuggle a second command.
+const SAFE_TAIL = /^[\w\s./=-]*$/;
+// Run the sample evaluator through the project venv.
+const EVAL_RE = /^\s*\.\/\.venv\/bin\/python3?\s+utils\/evaluate_samples\.py(\s+[\w\s./=-]+)?$/;
+// Run an ad-hoc analysis script that lives under analysis/ through the venv.
+const ANALYSIS_RUN_RE = /^\s*\.\/\.venv\/bin\/python3?\s+analysis\/[\w./-]+\.py(\s+[\w\s./=-]+)?$/;
 
 // Risky bash patterns that require an explicit user OK in NORMAL mode.
 const RISKY_PATTERNS: { re: RegExp; label: string }[] = [
@@ -126,6 +144,15 @@ export default function (pi: ExtensionAPI) {
   function isConfigPy(ctx: ExtensionContext, p: string | undefined): boolean {
     if (!p) return false;
     return resolve(ctx.cwd, p) === resolve(ctx.cwd, "config.py");
+  }
+
+  // True if p resolves to somewhere inside the scratch analysis/ directory
+  // (and does not escape it via ..).
+  function isAnalysisPath(ctx: ExtensionContext, p: string | undefined): boolean {
+    if (!p) return false;
+    const root = resolve(ctx.cwd, ANALYSIS_DIR);
+    const target = resolve(ctx.cwd, p);
+    return target === root || target.startsWith(root + "/");
   }
 
   function ts(ms: number): string {
@@ -312,19 +339,25 @@ export default function (pi: ExtensionAPI) {
 
     // ===== EXPERIMENT MODE: original hard guardrails. =====
     if (event.toolName === "write") {
-      return {
-        block: true,
-        reason: "Experiment mode: the `write` tool is disabled. You may only EDIT config.py. (shift+tab for normal mode)",
-      };
+      const p = (event.input as { path?: string }).path;
+      if (!isAnalysisPath(ctx, p)) {
+        return {
+          block: true,
+          reason:
+            `Experiment mode: \`write\` is only allowed for scratch analysis scripts under \`${ANALYSIS_DIR}/\` (got "${p}"). ` +
+            "Edit config.py to change the experiment, or switch to normal mode (shift+tab).",
+        };
+      }
+      return;
     }
 
     if (event.toolName === "edit") {
       const p = (event.input as { path?: string }).path;
-      if (!isConfigPy(ctx, p)) {
+      if (!isConfigPy(ctx, p) && !isAnalysisPath(ctx, p)) {
         return {
           block: true,
           reason:
-            `Experiment mode: edits are only allowed on config.py (got "${p}"). ` +
+            `Experiment mode: edits are only allowed on config.py or scratch scripts under \`${ANALYSIS_DIR}/\` (got "${p}"). ` +
             "Record other changes with record_finding, or switch to normal mode (shift+tab).",
         };
       }
@@ -333,12 +366,19 @@ export default function (pi: ExtensionAPI) {
 
     if (event.toolName === "bash") {
       const cmd = (event.input as { command?: string }).command ?? "";
+      // Analysis lane: evaluator + ad-hoc analysis scripts (read-only lane).
+      // SAFE_TAIL on the whole command rejects chaining/metacharacters.
+      if ((EVAL_RE.test(cmd) || ANALYSIS_RUN_RE.test(cmd)) && SAFE_TAIL.test(cmd)) {
+        return; // allowed, does not count toward the budget
+      }
       const m = cmd.match(LAUNCH_RE);
       if (!m) {
         return {
           block: true,
           reason:
-            "Experiment mode: the only allowed bash command is `./utils/hpc_run.sh <experiment_name>`. " +
+            "Experiment mode: allowed bash is `./utils/hpc_run.sh <experiment_name>` (launch), " +
+            "`./.venv/bin/python utils/evaluate_samples.py <name> [...]` (evaluate), or " +
+            "`./.venv/bin/python analysis/<script>.py [...]` (ad-hoc analysis). No shell chaining. " +
             "Use read/grep/find/ls to inspect files, or switch to normal mode (shift+tab).",
         };
       }

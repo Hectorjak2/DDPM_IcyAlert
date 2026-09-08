@@ -1,7 +1,25 @@
 {
-  "mode": "normal",
-  "experiments": [],
+  "mode": "experiment",
+  "experiments": [
+    {
+      "name": "long_ep100",
+      "status": "running",
+      "startedAt": 1788897047395
+    }
+  ],
   "findings": [],
-  "notes": [],
-  "budget": null
+  "notes": [
+    {
+      "text": "Eval is distributional but TrainConfig.number_of_samples defaulted to 1. Set it >=8 for any run we intend to evaluate, else per-field spatial stats are meaningless (n=1).",
+      "at": 1788897001617
+    },
+    {
+      "text": "Training-step budget is wall-clock bound at 1216^2: batch_size capped at 2 (OOM above), ~144 steps/epoch (288 fields). Reaching 1e5 steps needs ~700 epochs, infeasible in 12h. So undertraining can only be partially mitigated by raising epochs; watch whether a run completes before 12h.",
+      "at": 1788897001617
+    }
+  ],
+  "budget": {
+    "total": 5,
+    "startedAt": 1788897001618
+  }
 }

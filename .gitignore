@@ -1,5 +1,6 @@
 .venv
 data
+analysis
 .claude/settings.local.json
 *.pth
 results
