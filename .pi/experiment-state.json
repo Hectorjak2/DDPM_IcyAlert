@@ -1,76 +1,22 @@
 {
-  "mode": "normal",
+  "mode": "experiment",
   "experiments": [
     {
-      "name": "long_ep100",
+      "name": "linear_lr3e4_ep10",
       "status": "failed",
-      "startedAt": 1788897047395,
-      "endedAt": 1788897053660
+      "startedAt": 1788946758115,
+      "endedAt": 1788946758142
     },
     {
-      "name": "long_ep100_v2",
-      "status": "failed",
-      "startedAt": 1788897302991,
-      "endedAt": 1788926890815
-    },
-    {
-      "name": "lr3e4_ep10",
-      "status": "failed",
-      "startedAt": 1788927645070,
-      "endedAt": 1788927650680
-    },
-    {
-      "name": "lr3e4_ep10_v2",
-      "status": "completed",
-      "startedAt": 1788935009594,
-      "endedAt": 1788939664816
-    },
-    {
-      "name": "lr5e4_ep10",
-      "status": "failed",
-      "startedAt": 1788939758227,
-      "endedAt": 1788942432888
+      "name": "linear_lr3e4_ep10",
+      "status": "running",
+      "startedAt": 1788946803197
     }
   ],
-  "findings": [
-    {
-      "text": "The training loop (models/ddpm.py DDPM.train) has NO gradient clipping and always samples from the FINAL-epoch weights. This makes lr=1e-3 divergence unrecoverable (per-10-epoch checkpoints exist but are never used for sampling). Two pipeline improvements to consider: (1) add gradient clipping (e.g. clip_grad_norm_ ~1.0), and (2) keep/select a best/EMA checkpoint for sampling instead of the last-epoch weights.",
-      "at": 1788927219316
-    }
-  ],
-  "notes": [
-    {
-      "text": "Eval is distributional but TrainConfig.number_of_samples defaulted to 1. Set it >=8 for any run we intend to evaluate, else per-field spatial stats are meaningless (n=1).",
-      "at": 1788897001617
-    },
-    {
-      "text": "Training-step budget is wall-clock bound at 1216^2: batch_size capped at 2 (OOM above), ~144 steps/epoch (288 fields). Reaching 1e5 steps needs ~700 epochs, infeasible in 12h. So undertraining can only be partially mitigated by raising epochs; watch whether a run completes before 12h.",
-      "at": 1788897001617
-    },
-    {
-      "text": "Im not going to be present between experiments, so dont attempt to ask me during the 5 experiments. i will look at everything when all the 5 experiments are done",
-      "at": 1788899526228
-    },
-    {
-      "text": "lr=1e-3 with batch_size=2 DIVERGES: in long_ep100_v2 the per-step loss fell to ~0.0014 by epoch 6-8 then jumped to ~1.0 at epoch 9-10 and stayed there. Final (sampled) weights were post-divergence -> samples saturate to all-ice (ice_frac=0.999, frac<0.05=0.000). Use lr<=2e-4 for stability at this batch size.",
-      "at": 1788927219314
-    },
-    {
-      "text": "WALL CLOCK: 100 epochs at 1216^2 / batch2 takes ~8h. User wants epochs capped at ~10 per run so multiple experiments fit. ~4.8 min/epoch training; sampling (number_of_samples x 1000 steps) is a fixed per-run cost on top.",
-      "at": 1788927618346
-    },
-    {
-      "text": "POSITIVE RESULT: long_ep100_v2 (100 ep, before its epoch-9 divergence) produced visible ice CLUSTERS in plausible locations and much less Gaussian noise than earlier runs. Confirms training-duration is the key lever. Goal now: capture that structure gain within ~10 epochs AND avoid the lr=1e-3 divergence.",
-      "at": 1788927618347
-    },
-    {
-      "text": "BEST SO FAR: lr3e4_ep10_v2 (lr=3e-4, 10 ep, batch2). Stable, no divergence. W(conc)=0.192, ice_frac 0.311 vs real 0.305 (W=0.079!), frac<0.05=0.322 (real 0.674), water mean 0.137 (real 0.252). Remaining gap = spatial structure: spectrum_L1=0.315, spatial_std=0.157 vs real 0.379 (fields too smooth/low-contrast, under-bimodal). Value distribution good; structure needs more effective steps.",
-      "at": 1788939748106
-    },
-    {
-      "text": "WALL-CLOCK HEADROOM: lr3e4_ep10_v2 (10 ep + 8 samples) ran start-to-SCRIPT-DONE in ~72 min. So the 8h/100ep figure is dominated by training; at 10 epochs there is lots of headroom. Could raise epochs to ~20-30 and still finish several runs, but user asked to cap at 10 and explore OTHER knobs first.",
-      "at": 1788939748110
-    }
-  ],
-  "budget": null
+  "findings": [],
+  "notes": [],
+  "budget": {
+    "total": 2,
+    "startedAt": 1788946784408
+  }
 }

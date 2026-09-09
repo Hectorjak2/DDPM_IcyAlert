@@ -57,7 +57,7 @@ class DDPMConfig:
     see docs/architecture.md.
     """
     timesteps: int = 1000
-    schedule: str = "shifted_cosine"
+    schedule: str = "linear"
     shift_ref_resolution: int = 64
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -73,9 +73,9 @@ class TrainConfig:
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
-    experiment_name: str = "lr5e4_ep10"
+    experiment_name: str = "linear_lr3e4_ep10"
     batch_size: int = 2
     epochs: int = 10
-    lr: float = 5e-4
+    lr: float = 3e-4
     number_of_samples: int = 8
 
