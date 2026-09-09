@@ -1,5 +1,5 @@
 {
-  "mode": "experiment",
+  "mode": "normal",
   "experiments": [
     {
       "name": "long_ep100",
@@ -27,8 +27,9 @@
     },
     {
       "name": "lr5e4_ep10",
-      "status": "running",
-      "startedAt": 1788939758227
+      "status": "failed",
+      "startedAt": 1788939758227,
+      "endedAt": 1788942432888
     }
   ],
   "findings": [
@@ -71,8 +72,5 @@
       "at": 1788939748110
     }
   ],
-  "budget": {
-    "total": 4,
-    "startedAt": 1788934989293
-  }
+  "budget": null
 }

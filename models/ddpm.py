@@ -14,22 +14,7 @@ class DDPM:
     def __init__(self, timesteps: int = 1000, device: str = "mps", image_size: int = 128,
                  land_mask: torch.Tensor = None, schedule: str = None,
                  shift_ref_resolution: int = None):
-        """
-        Args:
-            timesteps: number of diffusion steps T.
-            device: torch device string.
-            image_size: spatial size used by ``sample()`` when no land mask is given, and
-                the resolution the noise schedule is shifted for. Must be set before the
-                schedule is built.
-            land_mask: optional static water/land mask of shape [1, H, W] or [1, 1, H, W]
-                with 1.0 = water, 0.0 = land. When given it is fed to the model as a
-                second input channel (so the network can tell land from open water,
-                which are otherwise both encoded as a valid concentration) and used to
-                mask land back to NaN in the generated samples.
-            schedule: ``"shifted_cosine"`` or ``"linear"``; defaults to ``DDPMConfig``.
-            shift_ref_resolution: reference resolution for the log-SNR shift; defaults to
-                ``DDPMConfig``. Ignored by the linear schedule.
-        """
+
         self.timesteps = timesteps
         self.device = device
         # Assigned before the schedule is built: the shift depends on it.
@@ -57,11 +42,7 @@ class DDPM:
 
         # Diffusion schedule. Precomputed once here rather than rebuilt on every
         # q_sample/p_sample call (which cost a linspace + cumprod per reverse step).
-        #
-        # Everything below is derived in float64 and cast to float32 only at the end.
-        # The posterior coefficients all divide by (1 - alpha_bar), which at small t is a
-        # subtraction of two nearly equal numbers: in float32 that cancellation is what
-        # made posterior_mean_coef_x0[0] come out as 0.999834 instead of exactly 1.0.
+
         betas, alphas, alphas_bar = self.build_schedule(timesteps)
 
         # alpha_bar_{t-1}, with alpha_bar_{-1} = 1 so the t=0 posterior reduces to x0.
@@ -120,9 +101,6 @@ class DDPM:
                 f"unknown schedule {self.schedule!r}; expected 'shifted_cosine' or 'linear'"
             )
 
-        # Recompute alpha_bar from the (possibly clamped) betas rather than reusing the
-        # analytic one, so betas, alphas and alphas_bar are mutually consistent and the
-        # posterior identities below hold exactly.
         alphas = 1.0 - betas
         alphas_bar = torch.cumprod(alphas, dim=0)
 
@@ -257,11 +235,8 @@ class DDPM:
         model.train()
         optimizer = Adam(model.parameters(), lr=lr)
 
-        # Bucket boundaries for per-timestep loss reporting. A single averaged loss
-        # is not a useful diagnostic here: for most of t ~ U(0, T) the signal has
-        # already decayed (sqrt(alpha_bar) < 0.3 beyond t/T ~ 0.5), so predicting the
-        # noise is close to the identity map and the average is dominated by that
-        # trivially easy regime. The low-t buckets are the ones that carry structure.
+        # Bucket boundaries for per-timestep loss reporting. It would be nice to be able to 
+        # see the loss in the t-intervals, so how well is it performing when t is high, low, etc.
         n_buckets = 5
         for epoch in range(epochs):
             if epoch % 10 == 0 and epoch > 0:
