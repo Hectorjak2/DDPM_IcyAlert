@@ -9,8 +9,9 @@
     },
     {
       "name": "linear_lr3e4_ep10",
-      "status": "running",
-      "startedAt": 1788946803197
+      "status": "completed",
+      "startedAt": 1788946803197,
+      "endedAt": 1788953666762
     }
   ],
   "findings": [],

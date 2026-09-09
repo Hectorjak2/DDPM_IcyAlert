@@ -62,6 +62,7 @@ def run(carra=False,
             channel_mult=unet_cfg.channel_mult,
             num_res_blocks=unet_cfg.num_res_blocks,
             attention_levels=unet_cfg.attention_levels,
+            mid_attention=unet_cfg.mid_attention,
             dropout=unet_cfg.dropout,
             groups=unet_cfg.groups,
         )

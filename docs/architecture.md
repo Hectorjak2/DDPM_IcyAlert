@@ -13,7 +13,7 @@
   - `sample(model)` — generates a sample from pure noise by iterating `p_sample` backwards; returns data-range `[0, 1]` with land set to NaN.
   - `train(model, dataloader, device, timesteps, epochs, lr)` — training loop with periodic checkpointing and per-timestep-bucket loss reporting.
 - **[models/unet.py](../models/unet.py)** — UNet architectures.
-  - `Unet` (general-purpose, resolution-agnostic) — configurable via `base_channels`, `channel_mult`, `num_res_blocks`, `attention_levels`, etc. Defaults: `base_channels=128`, `channel_mult=(1,2,2,2,4)`, `num_res_blocks=2`, `attention_levels=(3,)` (~78.7M params).
+  - `Unet` (general-purpose, resolution-agnostic) — configurable via `base_channels`, `channel_mult`, `num_res_blocks`, `attention_levels`, `mid_attention`, etc. Defaults: `base_channels=128`, `channel_mult=(1,2,2,2,4)`, `num_res_blocks=2`, `attention_levels=(3,)`, `mid_attention=True` (~78.7M params). Note that `attention_levels` governs the down/up paths only — the bottleneck is controlled separately by `mid_attention` (see Attention Placement).
   - `UnetSmall` (fixed for small images) — compact version for FashionMNIST (28×28).
 - **[utils/dataloader.py](../utils/dataloader.py)** — Dataset classes and range conversion.
   - `to_model_range(x)` / `to_data_range(x)` — map `[0, 1]` ↔ `[-1, 1]` (see Data Normalization below).
@@ -138,9 +138,20 @@ The `Unet` class's own defaults are `base_channels=128, channel_mult=(1,2,2,2,4)
 - `base_channels=64` (halved)
 - `channel_mult=(1,2,2,2)` (removed the 4x level)
 - `num_res_blocks=1` (halved)
-- `attention_levels=()` (no self-attention blocks)
+- `attention_levels=()` (no self-attention in the down/up paths)
+- `mid_attention=False` (no self-attention in the bottleneck either; see Attention Placement)
 
-This yields ~10M parameters — ~8× smaller, fitting comfortably into HPC memory budgets while still maintaining sufficient capacity to learn the diffusion task. FashionMNIST training uses `UnetSmall()` instead, a separate hand-tuned architecture for 28×28 images.
+This yields ~5.8M parameters, fitting comfortably into HPC memory budgets while still maintaining sufficient capacity to learn the diffusion task. FashionMNIST training uses `UnetSmall()` instead, a separate hand-tuned architecture for 28×28 images.
+
+### Attention Placement
+
+**Location:** [models/unet.py](../models/unet.py) `Unet.__init__()`, bottleneck construction.
+
+`attention_levels` only ever governed the down/up paths. The bottleneck `AttentionBlock` was unconditional, so `attention_levels=()` — documented here and in [config.py](../config.py) as "no attention" — still built one attention block at 1/8 resolution. At the WEST resolution that block sits at 152×152 = 23,104 tokens, where attention is quadratic in the token count. On `mps`, and on CUDA whenever SDPA falls back to the math backend, this materialises a `[B, heads, N, N]` matrix: ~34 GB at batch 4 in fp32. It was the single largest memory item in the network and the reason batch 4 would not fit at 1216×1216.
+
+`mid_attention` now controls it explicitly, rather than being inferred from an empty `attention_levels`. The two are kept separate because attention in the bottleneck and attention at a given down/up level are genuinely different design choices — the standard Ho et al. configuration uses both, and wanting one without the other is reasonable. The default stays `mid_attention=True` so the class still reproduces Ho et al. and so pre-2026-09-09 checkpoints (whose state dicts carry `mid.layers.1.qkv.*` keys) load unchanged. The CARRA2 config sets it to `False`.
+
+Profiling both this network and a colleague's attention-free `SuperResUNet` ([models/clara_unet.py](../models/clara_unet.py)) showed their convolutional activation costs are within 3% of each other at every resolution level, so attention placement and input resolution — not channel widths or block counts — are what actually drive memory here. At batch 4, activations scale as H·W: ~40 GB at 1000×1000 versus ~61 GB at 1216×1216.
 
 ### Region Split: WEST vs. TEST
 

@@ -203,6 +203,11 @@ class Unet(BaseUnet):
         num_res_blocks: residual blocks per resolution level.
         attention_levels: which downsampling levels (0-indexed) get self-attention.
             Level 0 is full resolution, level 1 is 1/2 resolution, etc.
+        mid_attention: whether the bottleneck gets a self-attention block. Independent
+            of ``attention_levels``, which only governs the down/up paths, so setting
+            ``attention_levels=()`` alone still leaves this block in place. Default
+            ``True`` matches Ho et al.; set ``False`` for a fully attention-free
+            network (see docs/architecture.md).
         dropout: dropout probability inside residual blocks.
         groups: number of groups for GroupNorm.
         image_size: (deprecated, kept for compatibility) no longer used for architecture.
@@ -216,6 +221,7 @@ class Unet(BaseUnet):
         channel_mult: tuple = (1, 2, 2, 2, 4),
         num_res_blocks: int = 2,
         attention_levels: tuple = (3,),  # Default: attention at 1/8 resolution
+        mid_attention: bool = True,  # Bottleneck attention; separate from attention_levels
         attention_resolutions: tuple = None,  # Deprecated, for backwards compat
         dropout: float = 0.1,
         groups: int = 32,
@@ -258,11 +264,13 @@ class Unet(BaseUnet):
                 skip_chs.append(ch)
 
         # ---- bottleneck ----
-        self.mid = TimestepBlock([
-            ResBlock(ch, ch, t_dim, dropout, groups),
-            AttentionBlock(ch, groups),
-            ResBlock(ch, ch, t_dim, dropout, groups),
-        ])
+        # Attention here is quadratic in H*W/64, which at 1216x1216 means 23k tokens.
+        # Keep it optional so attention_levels=() really does mean no attention anywhere.
+        mid_layers = [ResBlock(ch, ch, t_dim, dropout, groups)]
+        if mid_attention:
+            mid_layers.append(AttentionBlock(ch, groups))
+        mid_layers.append(ResBlock(ch, ch, t_dim, dropout, groups))
+        self.mid = TimestepBlock(mid_layers)
 
         # ---- upsampling path ----
         self.up_blocks = nn.ModuleList()

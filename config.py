@@ -28,7 +28,12 @@ class UnetConfig:
     base_channels: int = 64          # Reduced from 128
     channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)
     num_res_blocks: int = 1          # Reduced from 2
-    attention_levels: Tuple = ()     # No attention (was (3,))
+    # attention_levels governs the down/up paths only; mid_attention governs the
+    # bottleneck. Both are off, so the network has zero attention blocks. The
+    # bottleneck sits at 152x152 = 23k tokens at the WEST resolution, where
+    # attention is quadratic and was the single largest memory item.
+    attention_levels: Tuple = ()     # No attention in down/up (was (3,))
+    mid_attention: bool = False      # No attention in the bottleneck (was implicitly True)
     dropout: float = 0.1
     groups: int = 32
 
@@ -73,8 +78,8 @@ class TrainConfig:
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
-    experiment_name: str = "linear_lr3e4_ep10"
-    batch_size: int = 2
+    experiment_name: str = "linear_lr3e4_ep10_batch4"
+    batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 8
