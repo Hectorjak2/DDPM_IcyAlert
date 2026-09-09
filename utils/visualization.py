@@ -153,6 +153,9 @@ def plot_samples_grid(
 if __name__ == "__main__":
     import os 
     os.chdir("..")
+    with open("results/long_ep100_v2/samples.pkl", 'rb') as f:
+        samples = pickle.load(f)
+
     finite_mask = torch.load("data/finite_WEST.pt")
 
-    plot_samples_grid("results/Auto_exper222/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
+    plot_samples_grid("results/long_ep100_v2/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
