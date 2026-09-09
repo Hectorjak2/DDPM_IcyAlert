@@ -21,8 +21,14 @@
     },
     {
       "name": "lr3e4_ep10_v2",
+      "status": "completed",
+      "startedAt": 1788935009594,
+      "endedAt": 1788939664816
+    },
+    {
+      "name": "lr5e4_ep10",
       "status": "running",
-      "startedAt": 1788935009594
+      "startedAt": 1788939758227
     }
   ],
   "findings": [
@@ -55,6 +61,14 @@
     {
       "text": "POSITIVE RESULT: long_ep100_v2 (100 ep, before its epoch-9 divergence) produced visible ice CLUSTERS in plausible locations and much less Gaussian noise than earlier runs. Confirms training-duration is the key lever. Goal now: capture that structure gain within ~10 epochs AND avoid the lr=1e-3 divergence.",
       "at": 1788927618347
+    },
+    {
+      "text": "BEST SO FAR: lr3e4_ep10_v2 (lr=3e-4, 10 ep, batch2). Stable, no divergence. W(conc)=0.192, ice_frac 0.311 vs real 0.305 (W=0.079!), frac<0.05=0.322 (real 0.674), water mean 0.137 (real 0.252). Remaining gap = spatial structure: spectrum_L1=0.315, spatial_std=0.157 vs real 0.379 (fields too smooth/low-contrast, under-bimodal). Value distribution good; structure needs more effective steps.",
+      "at": 1788939748106
+    },
+    {
+      "text": "WALL-CLOCK HEADROOM: lr3e4_ep10_v2 (10 ep + 8 samples) ran start-to-SCRIPT-DONE in ~72 min. So the 8h/100ep figure is dominated by training; at 10 epochs there is lots of headroom. Could raise epochs to ~20-30 and still finish several runs, but user asked to cap at 10 and explore OTHER knobs first.",
+      "at": 1788939748110
     }
   ],
   "budget": {
