@@ -15,8 +15,9 @@
     },
     {
       "name": "lr3e4_ep10",
-      "status": "running",
-      "startedAt": 1788927645070
+      "status": "failed",
+      "startedAt": 1788927645070,
+      "endedAt": 1788927650680
     }
   ],
   "findings": [
