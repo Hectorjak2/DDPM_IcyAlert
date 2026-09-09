@@ -158,4 +158,4 @@ if __name__ == "__main__":
 
     finite_mask = torch.load("data/finite_WEST.pt")
 
-    plot_samples_grid("results/UnetSmall_FashionMNIST-train/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
+    plot_samples_grid("results/linear_lr3e4_ep10_batch4/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
