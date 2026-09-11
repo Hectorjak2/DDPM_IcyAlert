@@ -79,8 +79,8 @@ class TrainConfig:
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
     experiment_name: str = "linear_lr1e3_ep10_batch4"
-    batch_size: int = 4
-    epochs: int = 10
+    batch_size: int = 256
+    epochs: int = 2
     lr: float = 1e-3
     number_of_samples: int = 8
 

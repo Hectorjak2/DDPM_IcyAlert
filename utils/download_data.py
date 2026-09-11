@@ -17,23 +17,46 @@ import os
 import xarray as xr
 
 def download_carra2_monthly_data(save_name: str, years: list[str]):
-    ds_name = "CARRA2_MONTHLY"
+    ds_name = "CARRA2_DAILY"
     CARRA_PAN_AREA = [90, -180, 40, 180]   # full pan-CARRA domain
     dataset = "reanalysis-pan-carra-means"
     request = {
-        "time_aggregation": "monthly",
+        "time_aggregation": "daily",
         "level_type": "single_levels",
-        "variable": ["sea_ice_area_fraction"],
         "product_type": "analysis_based",
-        "year": years,
+        "year": [
+            "2000", "2001", "2002",
+            "2003", "2004", "2005",
+            "2006", "2007", "2008",
+            "2009", "2010", "2011",
+            "2012", "2013", "2014",
+            "2015", "2016", "2017",
+            "2018", "2019", "2020",
+            "2021", "2022", "2023",
+            "2024", "2025"
+        ],
         "month": [
             "01", "02", "03",
             "04", "05", "06",
             "07", "08", "09",
             "10", "11", "12"
         ],
+        "day": [
+            "01", "02", "03",
+            "04", "05", "06",
+            "07", "08", "09",
+            "10", "11", "12",
+            "13", "14", "15",
+            "16", "17", "18",
+            "19", "20", "21",
+            "22", "23", "24",
+            "25", "26", "27",
+            "28", "29", "30",
+            "31"
+        ],
         "data_format": "grib",
-        "area": CARRA_PAN_AREA
+        "variable": ["sea_ice_area_fraction"],
+        "area": [88, -90, 56, 30]
     }
 
     client = cdsapi.Client()

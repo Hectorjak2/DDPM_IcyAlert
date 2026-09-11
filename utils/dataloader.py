@@ -19,7 +19,7 @@ def to_data_range(x: torch.Tensor) -> torch.Tensor:
     return (x + 1.0) / 2.0
 
 class CARRA2(Dataset):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | None = None, WEST: bool = True, TEST: bool = False, batch_dim: bool = True):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | None = None, WEST: bool = False, TEST: bool = False, batch_dim: bool = True):
         """
         This class is a PyTorch Dataset for the CARRA2 dataset.
         It allows for loading a specific variable, selecting a time slice.
