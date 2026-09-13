@@ -16,7 +16,6 @@ def run(carra=False,
          lr=1e-3,
          download_carra2_data=False,
          experiment_name="default",
-         num_workers=0,
          ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
     
     if not carra and not fashion:
@@ -36,16 +35,12 @@ def run(carra=False,
     elif fashion:
         train_ds = FashionMNIST(train=True, device=device, batch_dim=False)
 
-    # num_workers > 0 prefetches batches in worker subprocesses so disk I/O overlaps
     # with GPU compute instead of blocking it (see docs/architecture.md). Datasets now
     # return CPU tensors for exactly this reason: MPS/CUDA tensors generally can't be
-    # created inside DataLoader worker subprocesses.
     dataloader = torch.utils.data.DataLoader(
         train_ds,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        persistent_workers=num_workers > 0,
     )
 
     #Defining the DDPM model, and the UNET
@@ -101,7 +96,6 @@ if __name__ == "__main__":
         epochs=TrainConfig.epochs,
         lr=TrainConfig.lr,
         experiment_name=TrainConfig.experiment_name,
-        num_workers=TrainConfig.num_workers,
     )
 
     # Sampling from the trained model (download_samples calls model.eval() itself)

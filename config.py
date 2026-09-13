@@ -83,8 +83,3 @@ class TrainConfig:
     epochs: int = 2
     lr: float = 1e-3
     number_of_samples: int = 8
-    # DataLoader worker processes for prefetching batches off the main/GPU thread.
-    # 4 matches the HPC allocation's 4 CPU cores (see run.sh); lower this locally if
-    # it saturates your Mac's cores during smoke tests.
-    num_workers: int = 4
-
