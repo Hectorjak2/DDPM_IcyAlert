@@ -78,9 +78,13 @@ class TrainConfig:
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
-    experiment_name: str = "linear_lr1e3_ep10_batch4"
-    batch_size: int = 256
+    experiment_name: str = "daily_data_ex1"
+    batch_size: int = 4
     epochs: int = 2
     lr: float = 1e-3
     number_of_samples: int = 8
+    # DataLoader worker processes for prefetching batches off the main/GPU thread.
+    # 4 matches the HPC allocation's 4 CPU cores (see run.sh); lower this locally if
+    # it saturates your Mac's cores during smoke tests.
+    num_workers: int = 4
 

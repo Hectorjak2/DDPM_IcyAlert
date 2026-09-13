@@ -8,14 +8,15 @@ from models.unet import Unet, UnetSmall
 from config import UnetConfig, DDPMConfig, TrainConfig 
 
 def run(carra=False,
-         fashion=False, 
+         fashion=False,
          verbose=True,
-         timesteps=100, 
+         timesteps=100,
          batch_size=16,
          epochs=100,
          lr=1e-3,
          download_carra2_data=False,
-         experiment_name="default"
+         experiment_name="default",
+         num_workers=0,
          ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
     
     if not carra and not fashion:
@@ -31,11 +32,21 @@ def run(carra=False,
 
     #Defining the dataset and dataloader
     if carra: 
-        train_ds = CARRA2("siconc", device, batch_dim=False)
+        train_ds = CARRA2("siconc", device, WEST=True, batch_dim=False)
     elif fashion:
         train_ds = FashionMNIST(train=True, device=device, batch_dim=False)
 
-    dataloader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    # num_workers > 0 prefetches batches in worker subprocesses so disk I/O overlaps
+    # with GPU compute instead of blocking it (see docs/architecture.md). Datasets now
+    # return CPU tensors for exactly this reason: MPS/CUDA tensors generally can't be
+    # created inside DataLoader worker subprocesses.
+    dataloader = torch.utils.data.DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
+    )
 
     #Defining the DDPM model, and the UNET
     # The static land mask is fed to the network as an extra input channel, so the
@@ -89,7 +100,8 @@ if __name__ == "__main__":
         batch_size=TrainConfig.batch_size,
         epochs=TrainConfig.epochs,
         lr=TrainConfig.lr,
-        experiment_name=TrainConfig.experiment_name
+        experiment_name=TrainConfig.experiment_name,
+        num_workers=TrainConfig.num_workers,
     )
 
     # Sampling from the trained model (download_samples calls model.eval() itself)

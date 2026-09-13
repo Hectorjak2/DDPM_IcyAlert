@@ -40,7 +40,13 @@ class CARRA2(Dataset):
 
         if selected_variable not in allowed_variables:
             raise ValueError(f"{selected_variable} not in {allowed_variables}")
-        ds = xr.open_zarr("data/CARRA2_MONTHLY/dataset.zarr", decode_coords="all")
+        # data/CARRA2_DAILY/west.zarr is a pre-cropped, pre-rechunked copy of the
+        # full-domain dataset.zarr, produced by utils/prepare_west_zarr.py. It
+        # already *is* the WEST bounding box (y=300:1516, x=884:2100 in the full
+        # domain), so WEST needs no further slicing here; TEST is a small crop of
+        # it, expressed in WEST-local coordinates. See docs/architecture.md,
+        # "Region Split: WEST vs. TEST".
+        ds = xr.open_zarr("data/CARRA2_DAILY/west.zarr", decode_coords="all")
         da = ds[selected_variable]
 
         if time_slice is not None:
@@ -48,13 +54,17 @@ class CARRA2(Dataset):
 
         # TEST takes precedence so it can be used together with the default WEST=True.
         if TEST:
-            #CARRA2 TEST AREA (128 x 128):
-            self.da = da.isel(y=slice(1272, 1400), x=slice(800, 928))
+            #CARRA2 TEST AREA (128 x 128, WEST-local coordinates):
+            self.da = da.isel(y=slice(972, 1100), x=slice(800, 928))
         elif WEST:
-            #CARRA2-WEST AREA:
-            self.da = da.isel(y=slice(300, 1516), x=slice(884, 2100))
-        else:
+            #CARRA2-WEST AREA: west.zarr already covers exactly this region.
             self.da = da
+        else:
+            raise ValueError(
+                "The full domain is no longer available through CARRA2 (only "
+                "data/CARRA2_DAILY/west.zarr is loaded). Use WEST=True or TEST=True, "
+                "or open data/CARRA2_DAILY/dataset.zarr directly for full-domain access."
+            )
 
         # The land/sea geometry is static in CARRA2, so derive the mask once from
         # the first time step instead of recomputing it per sample. Stored as
@@ -117,4 +127,4 @@ class FashionMNIST(Dataset):
         return img.to(self.device)
 
 if __name__ == "__main__":
-    train_ds = CARRA2("siconc", "mps", batch_dim=False)
+    train_ds = CARRA2("siconc", "mps", WEST=True, batch_dim=False)

@@ -18,7 +18,7 @@ import xarray as xr
 
 def download_carra2_monthly_data(save_name: str, years: list[str]):
     ds_name = "CARRA2_DAILY"
-    CARRA_PAN_AREA = [90, -180, 40, 180]   # full pan-CARRA domain
+    
     dataset = "reanalysis-pan-carra-means"
     request = {
         "time_aggregation": "daily",
@@ -55,9 +55,9 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
             "31"
         ],
         "data_format": "grib",
-        "variable": ["sea_ice_area_fraction"],
-        "area": [88, -90, 56, 30]
+        "variable": ["sea_ice_area_fraction"]
     }
+
 
     client = cdsapi.Client()
 
@@ -66,8 +66,7 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
 
     client.retrieve(dataset, request).download(grib_file)
     print(f"Downloaded CARRA2 data to {grib_file}")
-
-    ds = xr.open_dataset(grib_file, engine='cfgrib')
+    ds = xr.open_dataset(grib_file, engine="cfgrib", chunks={"time": 1})
     save_path = f'./data/{ds_name}/{save_name}.zarr'
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     ds.to_zarr(save_path, mode="w")
