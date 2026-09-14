@@ -5,16 +5,27 @@ from random import sample
 import torch
 from torch.optim import Adam
 import torch.nn.functional as F
-
+from typing import Optional
 from config import DDPMConfig
 from utils.dataloader import to_data_range
 
 
 class DDPM:
-    def __init__(self, timesteps: int = 1000, device: str = "mps", image_size: int = 128,
-                 land_mask: torch.Tensor = None, schedule: str = None,
-                 shift_ref_resolution: int = None):
+    def __init__(
+        self,
+        timesteps: int = 1000,
+        device: str = "mps",
+        image_size: int = 128,
+        land_mask: Optional[torch.Tensor] = None,
+        schedule: str = None,
+        shift_ref_resolution: Optional[int] = None,
+    ):
+        """
+        DDPM wrapper.
 
+        Args:
+            schedule: one of ["linear", "shifted_cosine"]
+        """
         self.timesteps = timesteps
         self.device = device
         # Assigned before the schedule is built: the shift depends on it.
