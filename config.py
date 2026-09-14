@@ -80,6 +80,6 @@ class TrainConfig:
     """
     experiment_name: str = "daily_data_ex5_shifted_20ep"
     batch_size: int = 4
-    epochs: int = 20
+    epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 8
