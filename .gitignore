@@ -6,3 +6,4 @@ analysis
 results
 *.pkl
 *.pyc
+*.png
