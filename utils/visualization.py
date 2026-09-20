@@ -5,6 +5,8 @@ import numpy as np
 import pickle
 from pathlib import Path
 from typing import Literal
+import os 
+from utils.dataloader import CARRA2
 
 def visualize_sic_sample(sample: torch.Tensor, finite_mask: torch.Tensor = None):
     sample = sample.cpu().squeeze()  # drop any leading batch/channel dims -> [H, W]
@@ -151,11 +153,19 @@ def plot_samples_grid(
     plt.show()
 
 if __name__ == "__main__":
-    import os 
+    result_set = "daily_data_ex5_shifted_10epochs"
+    
     os.chdir("..")
-    with open("results/long_ep100_v2/samples.pkl", 'rb') as f:
+    with open(f"results/{result_set}/samples.pkl", 'rb') as f:
         samples = pickle.load(f)
+
+    train_ds = CARRA2("siconc", "mps", WEST=True, batch_dim=False)
+    test_ds = CARRA2("siconc", "mps", TEST=True, batch_dim=False)
 
     finite_mask = torch.load("data/finite_WEST.pt")
 
-    plot_samples_grid("results/daily_data_ex3/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
+    plot_samples_grid(f"results/{result_set}/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
+
+    ## 
+    visualize_sic_sample(train_ds[0])
+    visualize_sic_sample(test_ds[7])

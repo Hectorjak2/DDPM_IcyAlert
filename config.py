@@ -12,6 +12,8 @@ block to use it.
 from dataclasses import dataclass
 from typing import Tuple
 
+from models.models import DatasetChoice
+
 
 @dataclass
 class UnetConfig:
@@ -72,14 +74,15 @@ class DDPMConfig:
 
 @dataclass
 class TrainConfig:
-    """Training hyperparameters.
+    """Training parameters and hyperparameters.
 
     Note: The current __main__ block in main.py uses batch_size=2, epochs=2,
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
-    experiment_name: str = "daily_data_ex6_linear_1500"
-    batch_size: int = 4
-    epochs: int = 10
+    dataset = DatasetChoice.CARRA_TEST
+    experiment_name: str = "carra_test_experiment1"
+    batch_size: int = 8
+    epochs: int = 1
     lr: float = 3e-4
-    number_of_samples: int = 8
+    number_of_samples: int = 2

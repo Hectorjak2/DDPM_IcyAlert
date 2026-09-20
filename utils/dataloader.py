@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import xarray as xr
 from torchvision import datasets, transforms
+from models.models import DatasetChoice
 
 allowed_variables = ["siconc"]
 CARRA_WEST_MASK = None
@@ -19,7 +20,7 @@ def to_data_range(x: torch.Tensor) -> torch.Tensor:
     return (x + 1.0) / 2.0
 
 class CARRA2(Dataset):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | None = None, WEST: bool = False, TEST: bool = False, batch_dim: bool = True):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True):
         """
         This class is a PyTorch Dataset for the CARRA2 dataset.
         It allows for loading a specific variable, selecting a time slice.
@@ -36,7 +37,7 @@ class CARRA2(Dataset):
         self.batch_dim = batch_dim
         self.device = device
         self.name = f"CARRA2-{selected_variable}"  # Add this
-
+        self.area = area
 
         if selected_variable not in allowed_variables:
             raise ValueError(f"{selected_variable} not in {allowed_variables}")
@@ -52,13 +53,9 @@ class CARRA2(Dataset):
         if time_slice is not None:
             da = da.sel(time=time_slice)
 
-        # TEST takes precedence so it can be used together with the default WEST=True.
-        if TEST:
-            #CARRA2 TEST AREA (128 x 128, WEST-local coordinates):
-            self.da = da.isel(y=slice(972, 1100), x=slice(800, 928))
-        elif WEST:
-            #CARRA2-WEST AREA: west.zarr already covers exactly this region.
-            self.da = da
+        if self.area == DatasetChoice.CARRA_TEST: 
+            self.da = da.isel(y=slice(750, 1006), x=slice(100, 356))
+
         else:
             raise ValueError(
                 "The full domain is no longer available through CARRA2 (only "

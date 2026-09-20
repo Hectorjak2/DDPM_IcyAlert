@@ -3,23 +3,23 @@ from utils import CARRA2, FashionMNIST, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
 from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary
 
+from models.models import DatasetChoice
 from models.ddpm import DDPM
-from models.unet import Unet, UnetSmall
+from models.unet import Unet, TestUnet, UnetSmall
 from config import UnetConfig, DDPMConfig, TrainConfig 
 
-def run(carra=False,
-         fashion=False,
-         verbose=True,
-         timesteps=100,
-         batch_size=16,
-         epochs=100,
-         lr=1e-3,
+def run(dataset: DatasetChoice,
+         timesteps: int,
+         batch_size: int,
+         epochs: int,
+         lr: int,
+         verbose: bool =True,
          download_carra2_data=False,
          experiment_name="default",
          ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
     
-    if not carra and not fashion:
-        raise ValueError("Please specify a dataset to use: CARRA2 or FashionMNIST")
+    if not isinstance(dataset, DatasetChoice):
+        raise ValueError("Please specify a valid dataset")
     
     device = get_device()
     if verbose:
@@ -30,9 +30,10 @@ def run(carra=False,
         download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)])
 
     #Defining the dataset and dataloader
-    if carra: 
-        train_ds = CARRA2("siconc", device, WEST=True, batch_dim=False)
-    elif fashion:
+    if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST): 
+        train_ds = CARRA2("siconc", device, area=dataset, batch_dim=False)
+
+    elif dataset == DatasetChoice.FASHION: 
         train_ds = FashionMNIST(train=True, device=device, batch_dim=False)
 
     # with GPU compute instead of blocking it (see docs/architecture.md). Datasets now
@@ -57,7 +58,7 @@ def run(carra=False,
     )
     print(schedule_summary(ddpm))
 
-    if carra:
+    if dataset == DatasetChoice.CARRA_WEST:
         # Build UNet from config (see config.py for the downsized CARRA2 config).
         # ~10M params instead of 78.7M; see docs/architecture.md for rationale.
         unet_cfg = UnetConfig()
@@ -72,7 +73,11 @@ def run(carra=False,
             dropout=unet_cfg.dropout,
             groups=unet_cfg.groups,
         )
-    elif fashion:
+
+    elif dataset == DatasetChoice.CARRA_TEST:
+        model = TestUnet()
+
+    elif dataset == DatasetChoice.FASHION:
         model = UnetSmall()
 
     print("Training the model... ")
@@ -90,7 +95,7 @@ if __name__ == "__main__":
     # HPC_RUN: full CARRA2 training (batch_size=16, epochs=100)
 
     model, ddpm, train_ds = run(
-        carra=True,
+        dataset=TrainConfig.dataset,
         timesteps=DDPMConfig.timesteps,
         batch_size=TrainConfig.batch_size,
         epochs=TrainConfig.epochs,

@@ -317,6 +317,44 @@ class Unet(BaseUnet):
         return self.out(h)
 
 
+class TestUnet(Unet):
+    """DDPM U-Net for the CARRA2 TEST region (256x256).
+
+    Same architecture as ``Unet`` (Wide-ResNet blocks, GroupNorm, attention,
+    timestep conditioning) — only the defaults change, dropping one
+    downsampling level and shrinking the channel count so it trains quickly
+    on local hardware (mps/cpu) instead of the full WEST-region config.
+    With ``channel_mult=(1, 2, 2, 4)`` the bottleneck sits at 32x32 (1024
+    tokens), so attention there stays cheap.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 2,
+        out_channels: int = 1,
+        base_channels: int = 64,
+        channel_mult: tuple = (1, 2, 2, 4),
+        num_res_blocks: int = 2,
+        attention_levels: tuple = (3,),
+        mid_attention: bool = True,
+        dropout: float = 0.1,
+        groups: int = 32,
+        **kwargs,
+    ):
+        super().__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            base_channels=base_channels,
+            channel_mult=channel_mult,
+            num_res_blocks=num_res_blocks,
+            attention_levels=attention_levels,
+            mid_attention=mid_attention,
+            dropout=dropout,
+            groups=groups,
+            **kwargs,
+        )
+
+
 class UnetSmall(BaseUnet):
     """Compact DDPM U-Net for small images (e.g., 28×28, 32×32).
 
@@ -441,6 +479,22 @@ if __name__ == "__main__":
             out = model(x, t)
         assert out.shape == x.shape, f"Shape mismatch: {out.shape} != {x.shape}"
         print(f"✓ {size}×{size}: input {tuple(x.shape)} → output {tuple(out.shape)}")
+
+    print()
+    print("=" * 60)
+    print("TEST UNET (for 256×256 CARRA2 TEST region)")
+    print("=" * 60)
+    model_test = TestUnet()
+    n_params = sum(p.numel() for p in model_test.parameters())
+    print(f"Parameters: {n_params / 1e6:.1f}M")
+    print()
+
+    x = torch.randn(2, 2, 256, 256)
+    t = torch.randint(0, 1000, (2,))
+    with torch.no_grad():
+        out = model_test(x, t)
+    assert out.shape == (2, 1, 256, 256), f"Shape mismatch: {out.shape}"
+    print(f"✓ 256×256: input {tuple(x.shape)} → output {tuple(out.shape)}")
 
     print()
     print("=" * 60)
