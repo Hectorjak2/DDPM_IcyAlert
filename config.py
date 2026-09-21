@@ -89,8 +89,8 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = "full_conditional_1"
+    experiment_name: str = "full_conditional_10epochs"
     batch_size: int = 4
-    epochs: int = 1
+    epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 2
+    number_of_samples: int = 10

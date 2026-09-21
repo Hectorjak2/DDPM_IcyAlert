@@ -50,8 +50,8 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
         sample = ddpm.sample(context=context, model=model)
 
         samples.append(sample.cpu())
-        targets.append(target)
-        contexts.append(context)
+        targets.append(target.cpu())
+        contexts.append(context.cpu())
 
         #dump the samples after each iteration
         pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
