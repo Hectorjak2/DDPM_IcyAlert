@@ -1,4 +1,4 @@
-from .dataloader import CARRA2, FashionMNIST
+from .dataloader import CARRA2, FashionMNIST, CARRA2Forecast
 from .visualization import visualize_sic_sample, visualize_fashion
 from .download_data import download_carra2_monthly_data
 from .device_utils import (

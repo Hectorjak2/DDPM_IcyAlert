@@ -149,6 +149,7 @@ class BaseUnet(nn.Module):
             device: Device to load weights onto ('cpu' or 'cuda').
         """
         self.load_state_dict(torch.load(path, map_location=device))
+        self.to(device)
         print(f"Model weights loaded from {path}")
 
     def save_checkpoint(self, path: str, optimizer=None, epoch: int = None, loss: float = None) -> None:

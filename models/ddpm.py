@@ -149,7 +149,7 @@ class DDPM:
         # Compute x_t using the forward diffusion formula
         xt = torch.sqrt(alpha_bar_t) * x0 + torch.sqrt(1 - alpha_bar_t) * noise
 
-        return xt, noise
+        return xt
 
     def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor): 
         """
@@ -160,8 +160,6 @@ class DDPM:
             x0: Original image tensor of shape [B, C, H, W].
             t: Timesteps tensor of shape [B].
         """
-        # Mask of valid (water) pixels; land is NaN in x0
-        mask = torch.isfinite(x0)
 
         # Replace NaNs so they don't propagate through the conv layers and
         # contaminate the predictions at valid pixels
@@ -169,14 +167,16 @@ class DDPM:
 
         # Sample x_t using the forward diffusion process, keeping the noise target
         noise = torch.randn_like(x0)
-        xt, noise = self.q_sample(x0, t, noise)
+        xt = self.q_sample(x0, t, noise)
 
         # Predict the noise using the model
         predicted_noise = model(self.model_input(xt), t)
 
-        # Mean squared error over masked (water) pixels only
+        # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];
+        # expand it to the batch size since boolean-mask indexing needs an exact shape
+        # match, not just a broadcastable one.
         se = (predicted_noise - noise) ** 2
-        loss = se[mask].mean()
+        loss = se[self.water_mask.expand_as(se)].mean()
 
         return loss
 
@@ -287,3 +287,101 @@ class DDPM:
 
         model.save_weights(f"results/{experiment_name}/final_{self.output_name}_batchsize{dataloader.batch_size}_t{timesteps}_epochs{epochs}_lr{lr}.pth")
 
+class ConditionalDDPM(DDPM):
+    def __init__(self, *args, forecast_period: slice, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.forecast_period = forecast_period
+
+    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor): 
+        """
+        Compute the loss for the DDPM model. 
+
+        Args:
+            model: The U-Net model.
+            x0: Original image tensor of shape [B, C, H, W].
+            t: Timesteps tensor of shape [B].
+        """
+
+        # Replace NaNs so they don't propagate through the conv layers and
+        # contaminate the predictions at valid pixels
+        x0 = torch.nan_to_num(x0, nan=0.0) #k+1, k, k-1
+
+        # Sample x_t using the forward diffusion process, keeping the noise target
+        noise = torch.randn_like(x0[:,0].unsqueeze(1))
+        xt = self.q_sample(x0[:,0].unsqueeze(1), t, noise) #Only taking k+1
+
+        #reconstructing the input to be [xt, k, k-1]
+        input_X = torch.cat([xt, x0[:,1:]], dim=1)
+
+        # Predict the noise using the model
+        predicted_noise = model(self.model_input(input_X), t)
+
+        # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];
+        # expand it to the batch size since boolean-mask indexing needs an exact shape
+        # match, not just a broadcastable one.
+        se = (predicted_noise - noise) ** 2
+        loss = se[self.water_mask.expand_as(se)].mean()
+
+        return loss
+
+    @torch.no_grad()
+    def p_sample(self, model, x, t, ):
+        """
+        Reverse diffusion process: p(x_{t-1} | x_t)
+
+        Parameterised through the predicted x_0 so it can be clamped to the valid
+        [-1, 1] data range at every step; without that, small errors compound over
+        T reverse steps and the sample drifts far outside the data range.
+
+        Args:
+            model: The U-Net model.
+            x: Current image tensor of shape [B, C, H, W].
+            t: Current timestep tensor of shape [B].
+        """
+        # No noise is added on the final step (t == 0), which is deterministic.
+        z = torch.randn_like(x[:,0].unsqueeze(1)) if t[0] > 0 else torch.zeros_like(x[:,0].unsqueeze(1))
+
+        #Reshape
+        alphas_bar_t = self.alphas_bar[t].view(-1, 1, 1, 1)
+        coef_x0 = self.posterior_mean_coef_x0[t].view(-1, 1, 1, 1)
+        coef_xt = self.posterior_mean_coef_xt[t].view(-1, 1, 1, 1)
+        variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
+
+        # Recover x_0 from the predicted noise and clamp it to the data range
+        predicted_noise = model(self.model_input(x), t)
+        x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
+        x0_pred = x0_pred.clamp(-1.0, 1.0)
+
+        # Posterior mean of q(x_{t-1} | x_t, x_0), plus noise
+        mean = coef_x0 * x0_pred + coef_xt * x[:,0].unsqueeze(1)
+        xt = mean + torch.sqrt(variance_t) * z
+
+        return xt
+
+    @torch.no_grad()
+    def sample(self, context:torch.Tensor, model):
+        """Generate one sample, returned in data range [0, 1] with land set to NaN."""
+        if self.water_mask is not None:
+            height, width = self.water_mask.shape[-2:]
+        else:
+            height = width = self.image_size
+
+        # Land pixels are NaN in the raw context; zero them out before they hit the
+        # conv layers, same as compute_loss does for x0 -- otherwise NaN spreads
+        # through the receptive field and compounds over every reverse step.
+        context = torch.nan_to_num(context, nan=0.0).unsqueeze(0)  # -> [1, C, H, W]
+        xt = torch.randn((1, 1, height, width), device=self.device)
+        for t in reversed(range(self.timesteps)):
+            t_tensor = torch.tensor([t], device=self.device).long()
+            # Re-assemble [xt, k, k-1] each step: the context channels stay fixed,
+            # but xt must be the latest denoised estimate, not the initial noise.
+            input_x = torch.cat([xt, context], dim=1)
+            xt = self.p_sample(model, input_x, t_tensor)
+
+        # Back from the model's [-1, 1] range to concentrations in [0, 1]
+        xt = to_data_range(xt.clamp(-1.0, 1.0))
+
+        if self.water_mask is not None:
+            xt = xt.masked_fill(~self.water_mask, float("nan"))
+
+        return xt

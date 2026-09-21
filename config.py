@@ -63,14 +63,18 @@ class DDPMConfig:
     ``shift_ref_resolution=64`` is the "simple diffusion" (Hoogeboom et al.) prescription;
     see docs/architecture.md.
     """
-    timesteps: int = 1500
-    schedule: str = "linear"
+    timesteps: int = 1000
+    schedule: str = "shifted_cosine"
     shift_ref_resolution: int = 64
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
     beta_end: float = 0.02
     device: str = "mps"  # Will be overridden by get_device() at runtime
 
+TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
+TEST_SLICE = slice("2020-01-01", "2025-12-31")
+MELT_SEASON = [slice(f"{year}-04-01", f"{year}-09-30") for year in range(2020, 2025)]
+COOL_SEASON = [slice(f"{year}-10-01", f"{year + 1}-03-31") for year in range(2020, 2024)]
 
 @dataclass
 class TrainConfig:
@@ -80,9 +84,13 @@ class TrainConfig:
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
-    dataset = DatasetChoice.CARRA_TEST
-    experiment_name: str = "carra_test_experiment1"
-    batch_size: int = 8
+    #Forecasting settings: 
+    forecasting_slice = TEST_SLICE #Set to None if forecasting should be disabled
+    
+    #regular settings
+    dataset = DatasetChoice.CARRA_WEST
+    experiment_name: str = "full_conditional_1"
+    batch_size: int = 4
     epochs: int = 1
     lr: float = 3e-4
     number_of_samples: int = 2

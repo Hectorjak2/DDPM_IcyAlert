@@ -1,18 +1,21 @@
 import torch
-from utils import CARRA2, FashionMNIST, download_carra2_monthly_data
+from utils import CARRA2, FashionMNIST, CARRA2Forecast, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
-from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary
+from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary, download_conditional_samples
 
 from models.models import DatasetChoice
-from models.ddpm import DDPM
+from models.ddpm import DDPM, ConditionalDDPM
 from models.unet import Unet, TestUnet, UnetSmall
-from config import UnetConfig, DDPMConfig, TrainConfig 
+from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
+
+device = get_device()
 
 def run(dataset: DatasetChoice,
          timesteps: int,
          batch_size: int,
          epochs: int,
          lr: int,
+         forecast_period: slice |None,
          verbose: bool =True,
          download_carra2_data=False,
          experiment_name="default",
@@ -21,7 +24,6 @@ def run(dataset: DatasetChoice,
     if not isinstance(dataset, DatasetChoice):
         raise ValueError("Please specify a valid dataset")
     
-    device = get_device()
     if verbose:
         device_diagnostics(device)
 
@@ -31,7 +33,10 @@ def run(dataset: DatasetChoice,
 
     #Defining the dataset and dataloader
     if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST): 
-        train_ds = CARRA2("siconc", device, area=dataset, batch_dim=False)
+        if forecast_period: 
+            train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=TRAINING_SLICE, batch_dim=False)
+        else: 
+            train_ds = CARRA2("siconc", device, area=dataset, batch_dim=False)
 
     elif dataset == DatasetChoice.FASHION: 
         train_ds = FashionMNIST(train=True, device=device, batch_dim=False)
@@ -48,14 +53,26 @@ def run(dataset: DatasetChoice,
     # The static land mask is fed to the network as an extra input channel, so the
     # model can distinguish land from open water (both otherwise look like a valid
     # concentration) and land can be masked back out of the generated samples.
-    ddpm = DDPM(
-        timesteps=timesteps,
-        device=device,
-        image_size=train_ds[0][0].shape[-1],
-        land_mask=train_ds.finite_mask,
-        schedule=DDPMConfig.schedule,
-        shift_ref_resolution=DDPMConfig.shift_ref_resolution,
-    )
+    if forecast_period: 
+        ddpm = ConditionalDDPM(
+                timesteps=timesteps,
+                device=device,
+                image_size=train_ds[0][0].shape[-1],
+                land_mask=train_ds.finite_mask,
+                schedule=DDPMConfig.schedule,
+                shift_ref_resolution=DDPMConfig.shift_ref_resolution,
+                forecast_period=forecast_period
+            ) 
+    else: 
+        ddpm = DDPM(
+            timesteps=timesteps,
+            device=device,
+            image_size=train_ds[0][0].shape[-1],
+            land_mask=train_ds.finite_mask,
+            schedule=DDPMConfig.schedule,
+            shift_ref_resolution=DDPMConfig.shift_ref_resolution,
+            forecast_period=forecast_period
+        ) 
     print(schedule_summary(ddpm))
 
     if dataset == DatasetChoice.CARRA_WEST:
@@ -63,7 +80,7 @@ def run(dataset: DatasetChoice,
         # ~10M params instead of 78.7M; see docs/architecture.md for rationale.
         unet_cfg = UnetConfig()
         model = Unet(
-            in_channels=unet_cfg.in_channels,
+            in_channels=unet_cfg.in_channels if not forecast_period else 4,
             out_channels=unet_cfg.out_channels,
             base_channels=unet_cfg.base_channels,
             channel_mult=unet_cfg.channel_mult,
@@ -75,13 +92,16 @@ def run(dataset: DatasetChoice,
         )
 
     elif dataset == DatasetChoice.CARRA_TEST:
-        model = TestUnet()
+        model = TestUnet(in_channels=2 if not forecast_period else 4)
 
     elif dataset == DatasetChoice.FASHION:
         model = UnetSmall()
 
     print("Training the model... ")
     ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
+    
+    #print("Loading model weights")
+    #model.load_weights(path="results/conditional_test_1/final_TestUnet_CARRA2-siconc_batchsize4_t1500_epochs1_lr0.0003.pth" ,device="mps")
 
     return model, ddpm, train_ds
 
@@ -96,6 +116,7 @@ if __name__ == "__main__":
 
     model, ddpm, train_ds = run(
         dataset=TrainConfig.dataset,
+        forecast_period = TrainConfig.forecasting_slice,
         timesteps=DDPMConfig.timesteps,
         batch_size=TrainConfig.batch_size,
         epochs=TrainConfig.epochs,
@@ -104,7 +125,12 @@ if __name__ == "__main__":
     )
 
     # Sampling from the trained model (download_samples calls model.eval() itself)
-    download_samples(ddpm, model, TrainConfig, TrainConfig.number_of_samples)
+    # If forecasting: 
+    if TrainConfig.forecasting_slice: 
+        test_ds = CARRA2Forecast("siconc", device, area=TrainConfig.dataset, time_slice=TrainConfig.forecasting_slice, batch_dim=False)
+        download_conditional_samples(ddpm, model, test_ds, TrainConfig, TrainConfig.number_of_samples)
+    else: 
+        download_samples(ddpm, model, TrainConfig, TrainConfig.number_of_samples) 
 
     config_path = dump_config_snapshot(TrainConfig, ddpm)
     print(f"Wrote config snapshot to {config_path}")

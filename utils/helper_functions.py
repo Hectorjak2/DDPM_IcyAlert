@@ -3,9 +3,10 @@ from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
-from models.ddpm import DDPM
+from models.ddpm import DDPM, ConditionalDDPM
 from config import UnetConfig, DDPMConfig, TrainConfig 
 
+import random
 
 def schedule_summary(ddpm: DDPM) -> str:
     """One-line description of the realised noise schedule (printed and snapshotted)."""
@@ -28,6 +29,32 @@ def download_samples(ddpm: DDPM, model, train_cfg: TrainConfig, n_of_samples: in
 
         #dump the samples after each iteration
         pickle.dump(samples, open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+
+def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainConfig, n_of_samples: int = 10):
+    print("Sampling from the trained model ...")
+    # Disable dropout for inference. Left in train mode the residual blocks inject
+    # noise at every one of the T reverse steps, which wrecks the sample.
+    model.eval()
+
+    samples = []
+    contexts = []
+    targets = []
+    times = []
+    for i in tqdm(range(n_of_samples)):
+        idx = random.randrange(len(test_ds))
+        sample = test_ds[idx]          # [3, H, W] = (k+1, k, k-1)
+        context = sample[1:]           # (k, k-1) — what you condition on
+        target  = sample[:1]           # k+1 — ground truth, for comparison only
+        times.append(test_ds.get_dates(idx))
+
+        sample = ddpm.sample(context=context, model=model)
+
+        samples.append(sample.cpu())
+        targets.append(target)
+        contexts.append(context)
+
+        #dump the samples after each iteration
+        pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
 
 
 def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM) -> Path:

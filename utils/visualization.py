@@ -6,7 +6,7 @@ import pickle
 from pathlib import Path
 from typing import Literal
 import os 
-from utils.dataloader import CARRA2
+from utils.dataloader import CARRA2, CARRA2Forecast
 
 def visualize_sic_sample(sample: torch.Tensor, finite_mask: torch.Tensor = None):
     sample = sample.cpu().squeeze()  # drop any leading batch/channel dims -> [H, W]
@@ -153,14 +153,17 @@ def plot_samples_grid(
     plt.show()
 
 if __name__ == "__main__":
+    from utils.dataloader import TRAINING_SLICE, TEST_SLICE, MELT_SEASON, COOL_SEASON
     result_set = "daily_data_ex5_shifted_10epochs"
     
     os.chdir("..")
     with open(f"results/{result_set}/samples.pkl", 'rb') as f:
         samples = pickle.load(f)
 
-    train_ds = CARRA2("siconc", "mps", WEST=True, batch_dim=False)
-    test_ds = CARRA2("siconc", "mps", TEST=True, batch_dim=False)
+    train_ds = CARRA2Forecast("siconc", "mps", time_slice=TRAINING_SLICE, batch_dim=False)
+    test_ds = CARRA2Forecast("siconc", "mps", time_slice=TEST_SLICE, batch_dim=False)
+    melt_ds = CARRA2Forecast("siconc", "mps", time_slice=MELT_SEASON, batch_dim=False)
+    cool_ds = CARRA2Forecast("siconc", "mps", time_slice=COOL_SEASON, batch_dim=False)
 
     finite_mask = torch.load("data/finite_WEST.pt")
 
