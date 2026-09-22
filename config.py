@@ -38,7 +38,7 @@ class UnetConfig:
     # enabled here: memory-efficient attention removes the O(N^2) *memory* cost
     # but not the O(N^2) *compute* cost, so those levels would still be
     # prohibitively slow. See docs/architecture.md.
-    attention_levels: Tuple = (3,)   # Down/up attention at 152x152, same cost as mid_attention.
+    attention_levels: Tuple = ()   # Down/up attention at 152x152, same cost as mid_attention.
     mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
     # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
     dropout: float = 0.1

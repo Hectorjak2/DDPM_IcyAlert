@@ -249,8 +249,12 @@ class DDPM:
         # Bucket boundaries for per-timestep loss reporting. It would be nice to be able to 
         # see the loss in the t-intervals, so how well is it performing when t is high, low, etc.
         n_buckets = 5
+        # Every 2 epochs: with epochs=10 (~10h total, ~1h/epoch) the old "% 10" cadence
+        # never fired inside range(epochs), so a crash lost the whole run with no
+        # fallback. This trades a bit of I/O for an actual safety net.
+        checkpoint_every = 2
         for epoch in range(epochs):
-            if epoch % 10 == 0 and epoch > 0:
+            if epoch % checkpoint_every == 0 and epoch > 0:
                 model.save_checkpoint(f"results/{experiment_name}/model_epoch_{epoch}.pth",
                                     optimizer=optimizer,
                                     epoch=epoch)
