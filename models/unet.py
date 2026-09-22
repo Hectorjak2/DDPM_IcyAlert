@@ -13,6 +13,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
 def timestep_embedding(t: torch.Tensor, dim: int, max_period: float = 10000.0) -> torch.Tensor:
@@ -110,8 +111,20 @@ class AttentionBlock(nn.Module):
         qkv = self.qkv(self.norm(x))
         qkv = qkv.reshape(b, 3, self.num_heads, c // self.num_heads, h * w)
         q, k, v = qkv.unbind(1)                       # each [B, heads, d, HW]
-        q, k, v = (t.transpose(-1, -2) for t in (q, k, v))  # [B, heads, HW, d]
-        out = F.scaled_dot_product_attention(q, k, v)       # [B, heads, HW, d]
+        # .contiguous() after the transpose: the fused flash/memory-efficient SDPA
+        # kernels silently fall back to the "math" backend on non-contiguous input,
+        # which materializes the full [B, heads, HW, HW] score matrix -- at the
+        # 152x152 bottleneck that's 31.8 GiB and OOMs a single A100. sdpa_kernel
+        # below then hard-fails instead of silently falling back, so a regression
+        # here shows up as an error, not a silent 30GB allocation.
+        q, k, v = (t.transpose(-1, -2).contiguous() for t in (q, k, v))  # [B, heads, HW, d]
+        # FLASH/EFFICIENT_ATTENTION are CUDA-only backends; on mps/cpu (local dev,
+        # see CLAUDE.md) fall back to whatever backend torch picks by default.
+        if x.is_cuda:
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
+                out = F.scaled_dot_product_attention(q, k, v)   # [B, heads, HW, d]
+        else:
+            out = F.scaled_dot_product_attention(q, k, v)       # [B, heads, HW, d]
         out = out.transpose(-1, -2).reshape(b, c, h, w)
         return x + self.proj(out)
 
