@@ -20,6 +20,7 @@ nvidia-smi
 module load cuda/12.4.1
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export CARRA2_DATA_ROOT=/work3/s234822/data/data/CARRA2_DAILY
 
 /zhome/eb/6/205174/DDPM_IcyAlert/.venv/bin/python -u \
     /zhome/eb/6/205174/DDPM_IcyAlert/main.py

@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 import torch
@@ -9,6 +11,10 @@ from models.models import DatasetChoice
 allowed_variables = ["siconc"]
 CARRA_WEST_MASK = None
 CARRA_TEST_MASK = None
+
+# Overridden on HPC (see run.sh) since the real data lives under /work3, not
+# the repo checkout. Defaults to the repo-relative path used for local dev.
+CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILY")
 
 
 def to_model_range(x: torch.Tensor) -> torch.Tensor:
@@ -49,7 +55,7 @@ class CARRA2(Dataset):
         # domain), so WEST needs no further slicing here; TEST is a small crop of
         # it, expressed in WEST-local coordinates. See docs/architecture.md,
         # "Region Split: WEST vs. TEST".
-        ds = xr.open_zarr("data/CARRA2_DAILY/west.zarr", decode_coords="all")
+        ds = xr.open_zarr(f"{CARRA2_DATA_ROOT}/west.zarr", decode_coords="all")
         da = ds[selected_variable]
 
         if isinstance(time_slice, list):
