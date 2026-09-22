@@ -97,11 +97,11 @@ def run(dataset: DatasetChoice,
     elif dataset == DatasetChoice.FASHION:
         model = UnetSmall()
 
-    #print("Training the model... ")
-    #ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
+    print("Training the model... ")
+    ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
     
-    print("Loading model weights")
-    model.load_weights(path="results/full_conditional_10epochs/final_Unet_CARRA2-siconc_batchsize4_t1000_epochs10_lr0.0003.pth", device=device)
+    #print("Loading model weights")
+    #model.load_weights(path="results/full_conditional_10epochs/final_Unet_CARRA2-siconc_batchsize4_t1000_epochs10_lr0.0003.pth", device=device)
 
     return model, ddpm, train_ds
 
