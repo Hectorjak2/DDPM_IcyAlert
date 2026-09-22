@@ -31,10 +31,14 @@ class UnetConfig:
     channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)
     num_res_blocks: int = 1          # Reduced from 2
     # attention_levels governs the down/up paths only; mid_attention governs the
-    # bottleneck. Both are off, so the network has zero attention blocks. The
-    # bottleneck sits at 152x152 = 23k tokens at the WEST resolution, where
-    # attention is quadratic and was the single largest memory item.
-    attention_levels: Tuple = ()     # No attention in down/up (was (3,))
+    # bottleneck. Level 3 (the last down-level, no further downsample) sits at
+    # the same 152x152 = 23k tokens as the bottleneck, so it costs the same as
+    # mid_attention -- cheap with the fused SDPA kernel (see AttentionBlock in
+    # models/unet.py). Levels 0-2 are 16x/256x/4100x more tokens^2 and are NOT
+    # enabled here: memory-efficient attention removes the O(N^2) *memory* cost
+    # but not the O(N^2) *compute* cost, so those levels would still be
+    # prohibitively slow. See docs/architecture.md.
+    attention_levels: Tuple = (3,)   # Down/up attention at 152x152, same cost as mid_attention.
     mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
     # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
     dropout: float = 0.1
