@@ -22,6 +22,7 @@ def download_samples(ddpm: DDPM, model, train_cfg: TrainConfig, n_of_samples: in
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
+    Path(f"results/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
     samples = []
     for i in tqdm(range(n_of_samples)):
         sample = ddpm.sample(model)
@@ -35,6 +36,7 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
+    Path(f"results/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
 
     samples = []
     contexts = []
