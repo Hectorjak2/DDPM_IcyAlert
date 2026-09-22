@@ -35,7 +35,8 @@ class UnetConfig:
     # bottleneck sits at 152x152 = 23k tokens at the WEST resolution, where
     # attention is quadratic and was the single largest memory item.
     attention_levels: Tuple = ()     # No attention in down/up (was (3,))
-    mid_attention: bool = False      # No attention in the bottleneck (was implicitly True)
+    mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
+    # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
     dropout: float = 0.1
     groups: int = 32
 
@@ -89,7 +90,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = "full_conditional_10epochsv2"
+    experiment_name: str = "full_conditional_10epochsv3"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
