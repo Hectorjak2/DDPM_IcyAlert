@@ -95,7 +95,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = "oktober_new_unet"
+    experiment_name: str = "oktober_new_unet2"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
