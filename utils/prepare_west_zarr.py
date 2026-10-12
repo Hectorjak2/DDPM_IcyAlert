@@ -26,8 +26,8 @@ WEST_Y = slice(300, 1516)
 WEST_X = slice(884, 2100)
 
 
-def main():
-    ds = xr.open_zarr(SRC_PATH, decode_coords="all")
+def process_west(src_path, dst_path):
+    ds = xr.open_zarr(src_path, decode_coords="all")
 
     # Only siconc + time are used by training; drop the rest (latitude/longitude
     # are static 2880x2880 grids -- 66MB each -- and valid_time/step/surface are
@@ -40,15 +40,15 @@ def main():
     # CARRA2.__getitem__ (a single da.isel(time=idx).values read per call).
     ds_west = ds_west.chunk({"time": 1, "y": -1, "x": -1})
 
-    print(f"Writing WEST crop ({ds_west.sizes}) to {DST_PATH} ...")
-    ds_west.to_zarr(DST_PATH, mode="w")
+    print(f"Writing WEST crop ({ds_west.sizes}) to {dst_path} ...")
+    ds_west.to_zarr(dst_path, mode="w")
     print("Done.")
 
-    result = subprocess.run(["du", "-sh", DST_PATH], capture_output=True, text=True)
-    print(f"{DST_PATH}: {result.stdout.strip()}")
-    result = subprocess.run(["du", "-sh", SRC_PATH], capture_output=True, text=True)
-    print(f"{SRC_PATH} (original, for comparison): {result.stdout.strip()}")
+    result = subprocess.run(["du", "-sh", dst_path], capture_output=True, text=True)
+    print(f"{dst_path}: {result.stdout.strip()}")
+    result = subprocess.run(["du", "-sh", src_path], capture_output=True, text=True)
+    print(f"{src_path} (original, for comparison): {result.stdout.strip()}")
 
 
 if __name__ == "__main__":
-    main()
+    process_west(SRC_PATH, DST_PATH)

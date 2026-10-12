@@ -15,9 +15,10 @@ cat > $HOME/.cdsapirc << 'EOF' url: 'YOURURL' key: 'YOURKEY' EOF
 import cdsapi
 import os
 import xarray as xr
+from utils.prepare_west_zarr import process_west
 
 def download_carra2_monthly_data(save_name: str, years: list[str]):
-    ds_name = "CARRA2_DAILY"
+    ds_name = "CARRA2_DAILYY"
     
     dataset = "reanalysis-pan-carra-means"
     request = {
@@ -74,6 +75,9 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
 
     os.remove(grib_file)
     print(f"Deleted temporary GRIB file {grib_file}")
+
+    #Recropping and only keeping SIC values: EDIT prepare_west_zarr.py for changes
+    process_west(f"data/{ds_name}/dataset.zarr", f"data/{ds_name}/west.zarr")
 
 if __name__ == "__main__":
     download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)])

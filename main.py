@@ -6,6 +6,7 @@ from utils.helper_functions import download_samples, dump_config_snapshot, sched
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
 from models.unet import Unet, TestUnet, UnetSmall
+from models.hec_unet import SimpleUnet
 from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
 
 device = get_device()
@@ -79,16 +80,22 @@ def run(dataset: DatasetChoice,
         # Build UNet from config (see config.py for the downsized CARRA2 config).
         # ~10M params instead of 78.7M; see docs/architecture.md for rationale.
         unet_cfg = UnetConfig()
-        model = Unet(
+        # model = Unet(
+        #     in_channels=unet_cfg.in_channels if not forecast_period else 4,
+        #     out_channels=unet_cfg.out_channels,
+        #     base_channels=unet_cfg.base_channels,
+        #     channel_mult=unet_cfg.channel_mult,
+        #     num_res_blocks=unet_cfg.num_res_blocks,
+        #     attention_levels=unet_cfg.attention_levels,
+        #     mid_attention=unet_cfg.mid_attention,
+        #     dropout=unet_cfg.dropout,
+        #     groups=unet_cfg.groups,
+        # )
+        model = SimpleUnet(
             in_channels=unet_cfg.in_channels if not forecast_period else 4,
             out_channels=unet_cfg.out_channels,
-            base_channels=unet_cfg.base_channels,
-            channel_mult=unet_cfg.channel_mult,
-            num_res_blocks=unet_cfg.num_res_blocks,
-            attention_levels=unet_cfg.attention_levels,
-            mid_attention=unet_cfg.mid_attention,
-            dropout=unet_cfg.dropout,
-            groups=unet_cfg.groups,
+            time_emb_dim=unet_cfg.time_emb_dim,
+            dropout=unet_cfg.dropout
         )
 
     elif dataset == DatasetChoice.CARRA_TEST:

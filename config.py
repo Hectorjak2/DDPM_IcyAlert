@@ -43,6 +43,7 @@ class UnetConfig:
     # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
     dropout: float = 0.1
     groups: int = 32
+    time_emb_dim: int = 256 
 
 
 @dataclass
@@ -94,7 +95,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = "full_conditional_10epochsv4"
+    experiment_name: str = "oktober_new_unet"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
