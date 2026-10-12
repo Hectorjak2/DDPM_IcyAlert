@@ -65,7 +65,7 @@ class ResidualBlock(nn.Module):
     """
     Residual block for the U-Net architecture. 
     """
-    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, groups: int = 8, dropout: float = 0.0, training: bool = True): 
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, groups: int = 8, dropout: float = 0.0): 
         super().__init__()
         self.norm1 = nn.GroupNorm(_valid_groups(in_channels,  groups), in_channels)
         self.norm2 = nn.GroupNorm(_valid_groups(out_channels,  groups), out_channels)
@@ -83,7 +83,7 @@ class ResidualBlock(nn.Module):
     def forward(self, x: torch.Tensor, t_emb: torch.Tensor): 
         """
         Following Ho et al. (2020): 
-        h = SiLU(GN(x)) -> Conv2D -> Add time embedding -> SiLU(GN(h)) -> Dropout -> Conv2D -> Add skip connection
+        h = SiLU(GN(x)) -> Conv2D -> Add time embedding -> SiLU(GN(h)) -> Dropout -> Conv2D -> Add internal skip connection
         """
         h = self.activation(self.norm1(x))
         h = self.conv1(h)
@@ -116,8 +116,8 @@ class SimpleUnet(BaseUnet):
 
         #downsampling path
         self.down_blocks = nn.ModuleList()
-        prev_channels = in_channels
-        skip_chs = [self.base_channel]  # after in_conv
+        prev_channels = self.base_channel 
+        skip_chs = []  # after in_conv
         for ch in self.channels:
             self.down_blocks.append(ResidualBlock(prev_channels, ch, time_emb_dim * 4, groups, dropout))
             skip_chs.append(ch)
@@ -140,7 +140,9 @@ class SimpleUnet(BaseUnet):
         self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor):
-        t_emb = self.time_mlp(t)
+        x = self.in_conv(x)
+
+        t_emb = self.time_mlp(t.float())
 
         #downsampling
         skip_connections = []
