@@ -97,6 +97,7 @@ def run(dataset: DatasetChoice,
             channels=unet_cfg.channels,
             time_emb_dim=unet_cfg.time_emb_dim,
             dropout=unet_cfg.dropout, 
+            groups=unet_cfg.groups,
         )
 
     elif dataset == DatasetChoice.CARRA_TEST:

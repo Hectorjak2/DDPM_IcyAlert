@@ -42,7 +42,7 @@ class UnetConfig:
     mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
     # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
     dropout: float = 0.1
-    groups: int = 32
+    groups: int = 8
     time_emb_dim: int = 256 
     channels = [64, 128, 128, 128]
 

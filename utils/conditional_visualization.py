@@ -107,6 +107,6 @@ def visualize_conditional_samples(
 
 
 if __name__ == "__main__":
-    result_set = "oktober_unet2"
+    result_set = "oktober_new_unet_deeperchannels2"
     finite_mask = torch.load("utils/finite_WEST.pt")
     visualize_conditional_samples(f"results/{result_set}/samples.pkl", finite_mask=finite_mask)
