@@ -110,6 +110,8 @@ class SimpleUnet(BaseUnet):
             nn.SiLU(),
             nn.Linear(time_emb_dim * 4, time_emb_dim * 4)
         )
+        self.activation = nn.SiLU()
+
         self.base_channel = channels[0]
 
         self.in_conv = nn.Conv2d(in_channels, self.base_channel, 3, padding=1)
@@ -136,8 +138,9 @@ class SimpleUnet(BaseUnet):
 
         assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
 
-        #final conv
-        self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=1)
+        #final norm + conv
+        self.final_norm = nn.GroupNorm(_valid_groups(prev_channels, groups), prev_channels)
+        self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor):
         x = self.in_conv(x)
@@ -165,7 +168,7 @@ class SimpleUnet(BaseUnet):
             else:  # ResidualBlock
                 x = block(x, t_emb)
 
-        return self.final_conv(x)
+        return self.final_conv(F.silu(self.final_norm(x)))
 
 def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, criterion: nn.Module, device: str = "cpu", epochs: int = 1):
     model.to(device)
