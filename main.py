@@ -94,8 +94,9 @@ def run(dataset: DatasetChoice,
         model = SimpleUnet(
             in_channels=unet_cfg.in_channels if not forecast_period else 4,
             out_channels=unet_cfg.out_channels,
+            channels=unet_cfg.channels,
             time_emb_dim=unet_cfg.time_emb_dim,
-            dropout=unet_cfg.dropout
+            dropout=unet_cfg.dropout, 
         )
 
     elif dataset == DatasetChoice.CARRA_TEST:

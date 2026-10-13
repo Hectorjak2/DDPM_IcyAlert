@@ -44,6 +44,8 @@ class UnetConfig:
     dropout: float = 0.1
     groups: int = 32
     time_emb_dim: int = 256 
+    channels = [64, 128, 128, 128]
+
 
 
 @dataclass
