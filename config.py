@@ -25,8 +25,6 @@ class UnetConfig:
     """
     # 2 input channels: the noised SIC field plus the static land/sea mask, so the
     # network can tell land from open water. Output is just the predicted noise.
-    in_channels: int = 2
-    out_channels: int = 1
     #base_channels: int = 64          # Reduced from 128
     #channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)
     #num_res_blocks: int = 1          # Reduced from 2
@@ -38,9 +36,11 @@ class UnetConfig:
     # enabled here: memory-efficient attention removes the O(N^2) *memory* cost
     # but not the O(N^2) *compute* cost, so those levels would still be
     # prohibitively slow. See docs/architecture.md.
-    attention_levels: Tuple = ()   # Down/up attention at 152x152, same cost as mid_attention.
-    mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
+    #attention_levels: Tuple = ()   # Down/up attention at 152x152, same cost as mid_attention.
+    #mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
     # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
+    in_channels: int = 2
+    out_channels: int = 1
     dropout: float = 0.1
     groups: int = 8
     time_emb_dim: int = 64 
