@@ -14,7 +14,7 @@ CARRA_TEST_MASK = None
 
 # Overridden on HPC (see run.sh) since the real data lives under /work3, not
 # the repo checkout. Defaults to the repo-relative path used for local dev.
-CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILYY")
+CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILY")
 
 
 def to_model_range(x: torch.Tensor) -> torch.Tensor:
