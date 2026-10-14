@@ -170,5 +170,5 @@ if __name__ == "__main__":
     plot_samples_grid(f"results/{result_set}/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
 
     ## 
-    visualize_sic_sample(train_ds[0])
-    visualize_sic_sample(test_ds[7])
+    visualize_sic_sample(train_ds[0][0])
+    visualize_sic_sample(test_ds[7][0])

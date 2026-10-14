@@ -14,7 +14,7 @@ CARRA_TEST_MASK = None
 
 # Overridden on HPC (see run.sh) since the real data lives under /work3, not
 # the repo checkout. Defaults to the repo-relative path used for local dev.
-CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILY")
+CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILYY")
 
 
 def to_model_range(x: torch.Tensor) -> torch.Tensor:
@@ -129,23 +129,29 @@ class CARRA2Forecast(CARRA2):
             km1_i = time_to_idx.get(km1_date)
             kp1_i = time_to_idx.get(kp1_date)
             if km1_i is not None and kp1_i is not None:
-                windows.append((km1_i, i, kp1_i))
-        self._windows = np.array(windows, dtype=np.int64).reshape(-1, 3)
+                # month of k+1 as an integer 0-11 (Jan=0 ... Dec=11)
+                windows.append((km1_i, i, kp1_i, pd.Timestamp(kp1_date).month - 1))
+        self._windows = np.array(windows, dtype=np.int64).reshape(-1, 4)
 
     def __len__(self):
         return len(self._windows)
 
+    def get_month(self, idx) -> int:
+        """Return the month (0-11, Jan=0) of the k+1 (target) date of sample `idx`."""
+        return int(self._windows[idx][3])
+
     def __getitem__(self, idx):
-        km1_i, k_i, kp1_i = self._windows[idx]
+        km1_i, k_i, kp1_i, month = self._windows[idx]
         km1 = super().__getitem__(km1_i)
         k = super().__getitem__(k_i)
         kp1 = super().__getitem__(kp1_i)
         context = torch.cat([kp1, k, km1], dim=0 if not self.batch_dim else 1)
-        return context #k+1, k, k-1
+        # context = (k+1, k, k-1); month = month of k+1 (0-11), fed to the UNet
+        return context, torch.tensor(month, dtype=torch.long, device=self.device)
 
     def get_dates(self, idx) -> tuple[np.datetime64, np.datetime64, np.datetime64]:
         """Return the (target, k, k-1) calendar dates backing sample `idx`, matching __getitem__'s (kp1, context=[k, km1]) layout."""
-        km1_i, k_i, kp1_i = self._windows[idx]
+        km1_i, k_i, kp1_i, _ = self._windows[idx]
         times = self.da.time.values
         return times[kp1_i], times[k_i], times[km1_i]
 

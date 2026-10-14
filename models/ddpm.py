@@ -252,7 +252,7 @@ class DDPM:
         # Every 2 epochs: with epochs=10 (~10h total, ~1h/epoch) the old "% 10" cadence
         # never fired inside range(epochs), so a crash lost the whole run with no
         # fallback. This trades a bit of I/O for an actual safety net.
-        checkpoint_every = 2
+        checkpoint_every = 20
         for epoch in range(epochs):
             if epoch % checkpoint_every == 0 and epoch > 0:
                 model.save_checkpoint(f"results/{experiment_name}/model_epoch_{epoch}.pth",
@@ -263,6 +263,11 @@ class DDPM:
             bucket_count = [0] * n_buckets
 
             for step, batch in enumerate(dataloader):
+                # Conditional datasets yield (context, month); others a bare tensor.
+                month = None
+                if isinstance(batch, (list, tuple)):
+                    batch, month = batch
+                    month = month.to(device)
                 batch = batch.to(device)
 
                 optimizer.zero_grad()
@@ -270,7 +275,8 @@ class DDPM:
                 # sample t from U(0,T)
                 t = torch.randint(0, timesteps, (batch.shape[0],), device=device).long()
 
-                loss = self.compute_loss(model, batch, t)
+                loss = (self.compute_loss(model, batch, t) if month is None
+                        else self.compute_loss(model, batch, t, month))
 
                 print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} ")#(t={t.tolist()})")
 
@@ -297,7 +303,7 @@ class ConditionalDDPM(DDPM):
         super().__init__(*args, **kwargs)
         self.forecast_period = forecast_period
 
-    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor): 
+    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor): 
         """
         Compute the loss for the DDPM model. 
 
@@ -305,6 +311,7 @@ class ConditionalDDPM(DDPM):
             model: The U-Net model.
             x0: Original image tensor of shape [B, C, H, W].
             t: Timesteps tensor of shape [B].
+            month: Month (0-11) of the target k+1, shape [B].
         """
 
         # Replace NaNs so they don't propagate through the conv layers and
@@ -319,7 +326,7 @@ class ConditionalDDPM(DDPM):
         input_X = torch.cat([xt, x0[:,1:]], dim=1)
 
         # Predict the noise using the model
-        predicted_noise = model(self.model_input(input_X), t)
+        predicted_noise = model(self.model_input(input_X), t, month)
 
         # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];
         # expand it to the batch size since boolean-mask indexing needs an exact shape
@@ -330,7 +337,7 @@ class ConditionalDDPM(DDPM):
         return loss
 
     @torch.no_grad()
-    def p_sample(self, model, x, t, ):
+    def p_sample(self, model, x, t, month):
         """
         Reverse diffusion process: p(x_{t-1} | x_t)
 
@@ -353,7 +360,7 @@ class ConditionalDDPM(DDPM):
         variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
 
         # Recover x_0 from the predicted noise and clamp it to the data range
-        predicted_noise = model(self.model_input(x), t)
+        predicted_noise = model(self.model_input(x), t, month)
         x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
         x0_pred = x0_pred.clamp(-1.0, 1.0)
 
@@ -364,7 +371,7 @@ class ConditionalDDPM(DDPM):
         return xt
 
     @torch.no_grad()
-    def sample(self, context:torch.Tensor, model):
+    def sample(self, context:torch.Tensor, month: int, model):
         """Generate one sample, returned in data range [0, 1] with land set to NaN."""
         if self.water_mask is not None:
             height, width = self.water_mask.shape[-2:]
@@ -376,12 +383,13 @@ class ConditionalDDPM(DDPM):
         # through the receptive field and compounds over every reverse step.
         context = torch.nan_to_num(context, nan=0.0).unsqueeze(0)  # -> [1, C, H, W]
         xt = torch.randn((1, 1, height, width), device=self.device)
+        month_tensor = torch.tensor([month], device=self.device).long()
         for t in reversed(range(self.timesteps)):
             t_tensor = torch.tensor([t], device=self.device).long()
             # Re-assemble [xt, k, k-1] each step: the context channels stay fixed,
             # but xt must be the latest denoised estimate, not the initial noise.
             input_x = torch.cat([xt, context], dim=1)
-            xt = self.p_sample(model, input_x, t_tensor)
+            xt = self.p_sample(model, input_x, t_tensor, month_tensor)
 
         # Back from the model's [-1, 1] range to concentrations in [0, 1]
         xt = to_data_range(xt.clamp(-1.0, 1.0))

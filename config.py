@@ -27,9 +27,9 @@ class UnetConfig:
     # network can tell land from open water. Output is just the predicted noise.
     in_channels: int = 2
     out_channels: int = 1
-    base_channels: int = 64          # Reduced from 128
-    channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)
-    num_res_blocks: int = 1          # Reduced from 2
+    #base_channels: int = 64          # Reduced from 128
+    #channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)
+    #num_res_blocks: int = 1          # Reduced from 2
     # attention_levels governs the down/up paths only; mid_attention governs the
     # bottleneck. Level 3 (the last down-level, no further downsample) sits at
     # the same 152x152 = 23k tokens as the bottleneck, so it costs the same as
@@ -43,7 +43,7 @@ class UnetConfig:
     # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
     dropout: float = 0.1
     groups: int = 8
-    time_emb_dim: int = 256 
+    time_emb_dim: int = 64 
     channels = [64, 128, 128, 128]
 
 
@@ -81,6 +81,7 @@ class DDPMConfig:
 
 TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")
+SMOKE_TEST_SLICE = slice("2000-01-01", "2000-12-31")
 MELT_SEASON = [slice(f"{year}-04-01", f"{year}-09-30") for year in range(2020, 2025)]
 COOL_SEASON = [slice(f"{year}-10-01", f"{year + 1}-03-31") for year in range(2020, 2024)]
 
@@ -97,7 +98,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = "oktober_new_unet_deeperchannels_v2"
+    experiment_name: str = "with_monthly_emb"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

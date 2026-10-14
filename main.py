@@ -101,7 +101,15 @@ def run(dataset: DatasetChoice,
         )
 
     elif dataset == DatasetChoice.CARRA_TEST:
-        model = TestUnet(in_channels=2 if not forecast_period else 4)
+        unet_cfg = UnetConfig()
+
+        model = SimpleUnet(
+            in_channels=unet_cfg.in_channels if not forecast_period else 4,
+            out_channels=unet_cfg.out_channels,
+            channels=unet_cfg.channels,
+            time_emb_dim=unet_cfg.time_emb_dim,
+            dropout=unet_cfg.dropout, 
+            groups=unet_cfg.groups)
 
     elif dataset == DatasetChoice.FASHION:
         model = UnetSmall()

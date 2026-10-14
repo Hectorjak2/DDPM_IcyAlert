@@ -9,3 +9,4 @@ matplotlib
 torchvision
 einop
 pydantic
+dask

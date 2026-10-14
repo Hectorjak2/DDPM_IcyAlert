@@ -35,6 +35,25 @@ class TimestepEmbedding(nn.Module):
         
         return embedding 
 
+class MonthlyEmbedding(nn.Module): 
+    """
+    Monthly embedding following The Fourier basis
+    """
+    def __init__(self, Nf: int): 
+        super().__init__()
+        self.Nf = Nf
+
+    def forward(self, month: torch.Tensor):
+        device = month.device
+
+        tmp = torch.arange(1, (self.Nf+1), device=device)
+        const = (2 * torch.pi) / (12)
+        args = month[:, None] * const * tmp[None, :]  # shape [B, Nf]
+
+        embedding = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)  # shape [B, 2*Nf]
+
+        return embedding
+
 class Downsampling(nn.Module): 
     """
     Downsampling method for the U-Net architecture. Uses a 3x3 convolution with stride 2
@@ -65,13 +84,14 @@ class ResidualBlock(nn.Module):
     """
     Residual block for the U-Net architecture. 
     """
-    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, groups: int = 8, dropout: float = 0.0): 
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, month_emb_dim: int, groups: int = 8, dropout: float = 0.0): 
         super().__init__()
         self.norm1 = nn.GroupNorm(_valid_groups(in_channels,  groups), in_channels)
         self.norm2 = nn.GroupNorm(_valid_groups(out_channels,  groups), out_channels)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
         self.time_emb_proj = nn.Linear(time_emb_dim, out_channels)
+        self.month_emb_proj = nn.Linear(month_emb_dim, out_channels)
         self.activation = nn.SiLU()
         self.dropout = dropout
 
@@ -80,7 +100,7 @@ class ResidualBlock(nn.Module):
             if in_channels != out_channels else nn.Identity()
         )
 
-    def forward(self, x: torch.Tensor, t_emb: torch.Tensor): 
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor, m_emb: torch.Tensor): 
         """
         Following Ho et al. (2020): 
         h = SiLU(GN(x)) -> Conv2D -> Add time embedding -> SiLU(GN(h)) -> Dropout -> Conv2D -> Add internal skip connection
@@ -89,7 +109,9 @@ class ResidualBlock(nn.Module):
         h = self.conv1(h)
 
         t_emb_proj = self.time_emb_proj(t_emb)[:, :, None, None]  # reshape to [B, C, 1, 1]
-        h = h + t_emb_proj
+        m_emb_proj = self.month_emb_proj(m_emb)[:, :, None, None]  # reshape to [B, C, 1, 1]
+
+        h = h + t_emb_proj + m_emb_proj
 
         h = self.activation(self.norm2(h))
         h = F.dropout(h, p=self.dropout, training=self.training)
@@ -101,7 +123,7 @@ class SimpleUnet(BaseUnet):
     """
     A simple U-Net architecture
     """
-    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0): 
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0): 
         super().__init__()
         self.channels = channels
         self.time_mlp = nn.Sequential(
@@ -110,7 +132,13 @@ class SimpleUnet(BaseUnet):
             nn.SiLU(),
             nn.Linear(time_emb_dim * 4, time_emb_dim * 4)
         )
-        self.activation = nn.SiLU()
+
+        self.month_mlp = nn.Sequential(
+            MonthlyEmbedding(Nf),
+            nn.Linear(2*Nf, time_emb_dim * 4),
+            nn.SiLU(),
+            nn.Linear(time_emb_dim * 4, time_emb_dim * 4)
+        )
 
         self.base_channel = channels[0]
 
@@ -121,19 +149,26 @@ class SimpleUnet(BaseUnet):
         prev_channels = self.base_channel 
         skip_chs = []  # after in_conv
         for ch in self.channels:
-            self.down_blocks.append(ResidualBlock(prev_channels, ch, time_emb_dim * 4, groups, dropout))
+            self.down_blocks.append(nn.ModuleList([
+                ResidualBlock(prev_channels, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
+                ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
+                Downsampling(ch, ch)]))
             skip_chs.append(ch)
-            self.down_blocks.append(Downsampling(ch, ch))
             prev_channels = ch
 
         #bottleneck
-        self.bottleneck = ResidualBlock(prev_channels, prev_channels, time_emb_dim * 4, groups, dropout)
+        self.bottleneck = nn.ModuleList()
+        self.bottleneck.append(ResidualBlock(prev_channels, prev_channels, time_emb_dim * 4, time_emb_dim * 4, groups, dropout))
+        self.bottleneck.append(ResidualBlock(prev_channels, prev_channels, time_emb_dim * 4, time_emb_dim * 4, groups, dropout))
 
         #upsampling path
         self.up_blocks = nn.ModuleList()
         for ch in reversed(self.channels):
-            self.up_blocks.append(Upsampling(prev_channels, ch))
-            self.up_blocks.append(ResidualBlock(ch + skip_chs.pop(), ch, time_emb_dim * 4, groups, dropout))
+            self.up_blocks.append(nn.ModuleList([
+                Upsampling(prev_channels, ch), 
+                ResidualBlock(ch + skip_chs.pop(), ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
+                ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout)                                   
+                ]))
             prev_channels = ch
 
         assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
@@ -142,32 +177,34 @@ class SimpleUnet(BaseUnet):
         self.final_norm = nn.GroupNorm(_valid_groups(prev_channels, groups), prev_channels)
         self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=3, padding=1)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor):
+    def forward(self, x: torch.Tensor, t: torch.Tensor, month: torch.Tensor):
         x = self.in_conv(x)
 
         t_emb = self.time_mlp(t.float())
+        m_emb = self.month_mlp(month.float())
 
         #downsampling
         skip_connections = []
-        for block in self.down_blocks:
-            if isinstance(block, ResidualBlock):
-                x = block(x, t_emb)
-                skip_connections.append(x)
-            else:  # Downsampling
-                x = block(x)
+        for res1, res2, downsample in self.down_blocks:
+            x = res1(x, t_emb, m_emb)
+            x = res2(x, t_emb, m_emb)
+            skip_connections.append(x)
+            x = downsample(x)
 
         #bottleneck
-        x = self.bottleneck(x, t_emb)
+        for block in self.bottleneck:
+            x = block(x, t_emb, m_emb)
 
         #upsampling
-        for block in self.up_blocks:
-            if isinstance(block, Upsampling):
-                x = block(x)
-                skip_x = skip_connections.pop()
-                x = torch.cat([x, skip_x], dim=1)  # concatenate along channel dimension
-            else:  # ResidualBlock
-                x = block(x, t_emb)
+        for upsample, res1, res2 in self.up_blocks:
+            x = upsample(x)
+            skip_x = skip_connections.pop()
+            x = torch.cat([x, skip_x], dim=1)  # concatenate along channel dimension
+            x = res1(x, t_emb, m_emb)
+            x = res2(x, t_emb, m_emb)
 
+        assert not skip_connections, f"skip connection bookkeeping mismatch: {skip_connections}"
+        
         return self.final_conv(F.silu(self.final_norm(x)))
 
 def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, criterion: nn.Module, device: str = "cpu", epochs: int = 1):

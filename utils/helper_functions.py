@@ -44,12 +44,12 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
     times = []
     for i in tqdm(range(n_of_samples)):
         idx = random.randrange(len(test_ds))
-        sample = test_ds[idx]          # [3, H, W] = (k+1, k, k-1)
+        sample, month = test_ds[idx]   # [3, H, W] = (k+1, k, k-1); month of k+1 (0-11)
         context = sample[1:]           # (k, k-1) — what you condition on
         target  = sample[:1]           # k+1 — ground truth, for comparison only
         times.append(test_ds.get_dates(idx))
 
-        sample = ddpm.sample(context=context, model=model)
+        sample = ddpm.sample(context=context, month=int(month), model=model)
 
         samples.append(sample.cpu())
         targets.append(target.cpu())

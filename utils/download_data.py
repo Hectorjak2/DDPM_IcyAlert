@@ -26,15 +26,7 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
         "level_type": "single_levels",
         "product_type": "analysis_based",
         "year": [
-            "2000", "2001", "2002",
-            "2003", "2004", "2005",
-            "2006", "2007", "2008",
-            "2009", "2010", "2011",
-            "2012", "2013", "2014",
-            "2015", "2016", "2017",
-            "2018", "2019", "2020",
-            "2021", "2022", "2023",
-            "2024", "2025"
+            "2000"
         ],
         "month": [
             "01", "02", "03",
@@ -60,12 +52,12 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
     }
 
 
-    client = cdsapi.Client()
+    #client = cdsapi.Client()
 
     grib_file = f"./data/{ds_name}/all.grib"
-    os.makedirs(os.path.dirname(grib_file), exist_ok=True)
+    #os.makedirs(os.path.dirname(grib_file), exist_ok=True)
 
-    client.retrieve(dataset, request).download(grib_file)
+    #client.retrieve(dataset, request).download(grib_file)
     print(f"Downloaded CARRA2 data to {grib_file}")
     ds = xr.open_dataset(grib_file, engine="cfgrib", chunks={"time": 1})
     save_path = f'./data/{ds_name}/{save_name}.zarr'
