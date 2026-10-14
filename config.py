@@ -44,7 +44,7 @@ class UnetConfig:
     dropout: float = 0.1
     groups: int = 8
     time_emb_dim: int = 64 
-    channels = [64, 128, 128, 128]
+    channels = [32, 64, 128, 128]
 
 
 
@@ -93,13 +93,18 @@ class TrainConfig:
     which looks like a smoke-test config. See docs/architecture.md for details.
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
+    #DDPM or Unet
+    training_type: str = "ddpm" #"unet", "ddpm"
+
     #Forecasting settings: 
     forecasting_slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = "with_monthly_emb"
+    dataset = DatasetChoice.CARRA_TEST
+    experiment_name: str = f"{training_type}-with_monthly_emb"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 10
+    sampling: bool = True
+

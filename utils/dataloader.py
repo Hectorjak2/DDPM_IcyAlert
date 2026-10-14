@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 import xarray as xr
 from torchvision import datasets, transforms
 from models.models import DatasetChoice
+import dask
 
 allowed_variables = ["siconc"]
 CARRA_WEST_MASK = None
@@ -27,7 +28,7 @@ def to_data_range(x: torch.Tensor) -> torch.Tensor:
     return (x + 1.0) / 2.0
 
 class CARRA2(Dataset):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, standardize: bool = False):
         """
         This class is a PyTorch Dataset for the CARRA2 dataset.
         It allows for loading a specific variable, selecting a time slice.
@@ -46,6 +47,7 @@ class CARRA2(Dataset):
         self.device = device
         self.name = f"CARRA2-{selected_variable}"  # Add this
         self.area = area
+        self.standardize = standardize  # Standardize to zero-mean unit-scale for the U-Net baseline. Otherwise keep the original model_to_range [-1,1] scaling
 
         if selected_variable not in allowed_variables:
             raise ValueError(f"{selected_variable} not in {allowed_variables}")
@@ -83,6 +85,15 @@ class CARRA2(Dataset):
             torch.from_numpy(np.isfinite(first)).float().unsqueeze(0).to(device)
         )
 
+        if self.standardize:
+            # Statistics over water (finite) pixels only; land is NaN and must not count.
+            water = self.da.where(np.isfinite(self.da))
+            self.mean, self.std = dask.compute(
+                water.mean(skipna=True), water.std(skipna=True)
+            )
+
+
+
     def __len__(self):
         return self.da.sizes["time"]
 
@@ -92,14 +103,14 @@ class CARRA2(Dataset):
         # siconc is a fraction in [0, 1]; the diffusion process assumes roughly
         # zero-mean unit-scale data, so shift to [-1, 1]. NaN (land) stays NaN and
         # is handled by the loss mask.
-        t = to_model_range(t)
+        t = to_model_range(t) if not self.standardize else (t - float(self.mean)) / float(self.std)
         if self.batch_dim:
             t = t.unsqueeze(0)  # [1, 1, H, W]
         return t.to(self.device)
 
 
 class CARRA2Forecast(CARRA2):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, standardize: bool = False):
         """
         A forecasting variant of CARRA2: each sample is a triplet of days one
         calendar *month* apart (k-1, k, k+1) -- e.g. 5 Sep, 5 Oct, 5 Nov --
@@ -116,7 +127,7 @@ class CARRA2Forecast(CARRA2):
         dropped, so a window can never silently splice together dates from
         two different blocks/years.
         """
-        super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim)
+        super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim, standardize=standardize)
 
         times = self.da.time.values
         time_to_idx = {t: i for i, t in enumerate(times)}

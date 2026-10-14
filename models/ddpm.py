@@ -296,7 +296,7 @@ class DDPM:
             )
             print(f"Epoch {epoch} loss by timestep bucket -- {summary}")
 
-        model.save_weights(f"results/{experiment_name}/final_{self.output_name}_batchsize{dataloader.batch_size}_t{timesteps}_epochs{epochs}_lr{lr}.pth")
+        model.save_weights(f"results/{experiment_name}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
     def __init__(self, *args, forecast_period: slice, **kwargs):

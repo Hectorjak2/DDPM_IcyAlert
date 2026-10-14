@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -123,8 +125,9 @@ class SimpleUnet(BaseUnet):
     """
     A simple U-Net architecture
     """
-    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0): 
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0, land_mask: torch.Tensor = None, device: str = "mps"): 
         super().__init__()
+        self.device = device
         self.channels = channels
         self.time_mlp = nn.Sequential(
             TimestepEmbedding(time_emb_dim),
@@ -177,6 +180,19 @@ class SimpleUnet(BaseUnet):
         self.final_norm = nn.GroupNorm(_valid_groups(prev_channels, groups), prev_channels)
         self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=3, padding=1)
 
+        #### For UNET baseline 
+        if land_mask is not None:
+            land_mask = land_mask.to(self.device).float()
+            while land_mask.dim() < 4:
+                land_mask = land_mask.unsqueeze(0)  # -> [1, 1, H, W]
+            # Match the [-1, 1] scale of the image channel: +1 water, -1 land.
+            self.mask_channel = land_mask * 2.0 - 1.0
+            self.water_mask = land_mask.bool()
+            self.image_size = max(land_mask.shape[-2:])
+        else:
+            self.mask_channel = None
+            self.water_mask = None
+
     def forward(self, x: torch.Tensor, t: torch.Tensor, month: torch.Tensor):
         x = self.in_conv(x)
 
@@ -207,24 +223,42 @@ class SimpleUnet(BaseUnet):
         
         return self.final_conv(F.silu(self.final_norm(x)))
 
-def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, criterion: nn.Module, device: str = "cpu", epochs: int = 1):
+def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default"):
     model.to(device)
     model.train()
+    os.makedirs(f"results/{experiment_name}", exist_ok=True)
 
     for epoch in range(epochs):
         total_loss = 0.0
-        for batch in dataloader:
+        for step, batch in enumerate(dataloader):
+            batch, month = batch
+            batch = batch.to(device)
+            month = month.to(device)
+            batch = torch.nan_to_num(batch, nan=0.0)  # Replace NaNs with zeros
+            
+            target = batch[:, 0]  # target is the first channel (k+1)
 
-            inputs, targets, timesteps = batch
-            inputs, targets, timesteps = inputs.to(device), targets.to(device), timesteps.to(device)
+            assert model.mask_channel is not None, "Land mask channel is not set in the model."
+            x = torch.concat([batch[:,1:], model.mask_channel.expand(batch.shape[0], -1, -1, -1)], dim=1)  #keeping only the context (k, k-1) and removing the target (k+1) from the input to the model. Concatenating the land mask channel
 
             optimizer.zero_grad()
-            outputs = model(inputs, timesteps)
-            loss = criterion(outputs, targets)
+            t = torch.Tensor([0]).to(device)
+
+            pred = model(x, t, month)
+
+            se = (pred - target) ** 2
+            loss = se[model.water_mask.expand_as(se)].mean()
+            
+            total_loss += loss.item()
+
+            print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} ")#(t={t.tolist()})")
+
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-            total_loss += loss.item()
 
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}")
+
+    model.save_weights(f"results/{experiment_name}/final_weights.pth")
