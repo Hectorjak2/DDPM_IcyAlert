@@ -154,7 +154,7 @@ class SimpleUnet(BaseUnet):
         for ch in self.channels:
             self.down_blocks.append(nn.ModuleList([
                 ResidualBlock(prev_channels, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
-                ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
+                #ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
                 Downsampling(ch, ch)]))
             skip_chs.append(ch)
             prev_channels = ch
@@ -170,7 +170,7 @@ class SimpleUnet(BaseUnet):
             self.up_blocks.append(nn.ModuleList([
                 Upsampling(prev_channels, ch), 
                 ResidualBlock(ch + skip_chs.pop(), ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
-                ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout)                                   
+                #ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout)                                   
                 ]))
             prev_channels = ch
 
@@ -201,9 +201,9 @@ class SimpleUnet(BaseUnet):
 
         #downsampling
         skip_connections = []
-        for res1, res2, downsample in self.down_blocks:
+        for res1, downsample in self.down_blocks:
             x = res1(x, t_emb, m_emb)
-            x = res2(x, t_emb, m_emb)
+            #x = res2(x, t_emb, m_emb)
             skip_connections.append(x)
             x = downsample(x)
 
@@ -212,12 +212,12 @@ class SimpleUnet(BaseUnet):
             x = block(x, t_emb, m_emb)
 
         #upsampling
-        for upsample, res1, res2 in self.up_blocks:
+        for upsample, res1 in self.up_blocks:
             x = upsample(x)
             skip_x = skip_connections.pop()
             x = torch.cat([x, skip_x], dim=1)  # concatenate along channel dimension
             x = res1(x, t_emb, m_emb)
-            x = res2(x, t_emb, m_emb)
+            #x = res2(x, t_emb, m_emb)
 
         assert not skip_connections, f"skip connection bookkeeping mismatch: {skip_connections}"
         

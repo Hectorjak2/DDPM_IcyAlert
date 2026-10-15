@@ -165,7 +165,7 @@ if __name__ == "__main__":
     melt_ds = CARRA2Forecast("siconc", "mps", time_slice=MELT_SEASON, batch_dim=False)
     cool_ds = CARRA2Forecast("siconc", "mps", time_slice=COOL_SEASON, batch_dim=False)
 
-    finite_mask = torch.load("data/finite_WEST.pt")
+    finite_mask = torch.load("plotting/finite_WEST.pt")
 
     plot_samples_grid(f"results/{result_set}/samples.pkl", "carra", grid_size=5, finite_mask=finite_mask)
 

@@ -72,8 +72,9 @@ def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM) -> Path:
     out_path = out_dir / "config.txt"
 
     lines = [f"Config snapshot -- {datetime.now().isoformat(timespec='seconds')}", ""]
-    for cfg in (UnetConfig, DDPMConfig, train_cfg):
-        lines.append(cfg.__name__ if isinstance(cfg, type) else type(cfg).__name__)
+    # Instances, not classes: default_factory fields only exist on instances.
+    for cfg in (UnetConfig(), DDPMConfig(), train_cfg):
+        lines.append(type(cfg).__name__)
         for f in fields(cfg):
             lines.append(f"    {f.name} = {getattr(cfg, f.name)!r}")
         lines.append("")

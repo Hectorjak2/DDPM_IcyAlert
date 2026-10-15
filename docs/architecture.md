@@ -24,7 +24,12 @@
   - `get_device_info()` — diagnostic info (VRAM, compute capability, etc.).
   - `device_diagnostics(device)` — prints device details.
 - **[utils/download_data.py](../utils/download_data.py)** — CDS (Climate Data Store) API client for downloading CARRA2 monthly data.
-- **[utils/visualization.py](../utils/visualization.py)** — Plotting helpers (`visualize_sic_sample`, `visualize_fashion`).
+- **[plotting/](../plotting/)** — All plotting code, split out of `utils/`. A regular package; run from the repo root so imports resolve as `plotting.*`.
+  - [plotting/visualization.py](../plotting/visualization.py) — Sample plotting helpers (`visualize_sic_sample`, `visualize_fashion`, `plot_samples_grid`).
+  - [plotting/conditional_visualization.py](../plotting/conditional_visualization.py) — Conditional forecast plots (context, ground truth, prediction).
+  - [plotting/plot_schedule.py](../plotting/plot_schedule.py) and [plotting/schedule_analysis.py](../plotting/schedule_analysis.py) — Noise-schedule plots and the per-scale correlation analysis.
+  - [plotting/plot_config.py](../plotting/plot_config.py) — Thesis figure style (10pt serif, `usetex`) plus `savefig` and `TEXTWIDTH_IN` (thesis `\textwidth` = 448.13pt). Thesis figures are saved as vector PDFs to `figures/`; use the `/thesis-plot` skill. Needs a local LaTeX install, so keep it out of HPC code paths.
+  - `finite_TEST.pt` / `finite_WEST.pt` — Saved land/water masks used by the visualization scripts (WEST-shaped vs TEST-shaped, so they are not interchangeable).
 - **[data/](../data/)** (gitignored) — `CARRA2_MONTHLY/dataset.zarr` (zarr store, large) and `FashionMNIST/raw` (auto-downloaded by torchvision).
 - **[results/](../results/)** (gitignored) — Checkpoints and sampled outputs, organized by `{model_name}_{dataset_name}/`.
 - **[run.sh](../run.sh)** — DTU HPC batch script (LSF/BSUB) that loads cuda/12.4.1, sets PyTorch config, and invokes `python main.py`.
@@ -51,7 +56,7 @@ The CARRA2 sea-ice concentration field (`siconc`) is defined only over water; la
 
 `siconc` is a fraction in `[0, 1]` (mean ≈ 0.36, std ≈ 0.45 over CARRA2-WEST); FashionMNIST is `[0, 1]` after `ToTensor()`. The DDPM forward process `x_t = sqrt(ᾱ_t)·x_0 + sqrt(1-ᾱ_t)·ε` assumes roughly zero-mean, unit-scale `x_0`, so both datasets are shifted to `[-1, 1]` with `2x - 1` on load, and `sample()` maps back with `(x+1)/2`.
 
-**Why it matters:** Training on un-normalized `[0, 1]` data mismatches the noise schedule's assumed signal scale. An earlier run without this produced samples with mean 1.28 and range `[-11, 25]` — entirely outside the valid concentration range, and clipped to near-uniform white by the `vmin=0, vmax=1` plotting in [utils/visualization.py](../utils/visualization.py).
+**Why it matters:** Training on un-normalized `[0, 1]` data mismatches the noise schedule's assumed signal scale. An earlier run without this produced samples with mean 1.28 and range `[-11, 25]` — entirely outside the valid concentration range, and clipped to near-uniform white by the `vmin=0, vmax=1` plotting in [plotting/visualization.py](../plotting/visualization.py).
 
 **Consequence:** Checkpoints trained before this change are not compatible — they learned a different input distribution.
 

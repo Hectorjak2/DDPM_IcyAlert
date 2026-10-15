@@ -9,7 +9,7 @@ When you want to change a hyperparameter, edit it here, then update main.py's __
 block to use it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from models.models import DatasetChoice
@@ -18,34 +18,13 @@ from models.models import DatasetChoice
 @dataclass
 class UnetConfig:
     """UNet architecture configuration for CARRA2 training.
-
-    The defaults here are the downsized version optimized for 64GB HPC memory:
-    ~10M params instead of the Unet class's own defaults (~78.7M).
-    See docs/architecture.md for rationale.
     """
-    # 2 input channels: the noised SIC field plus the static land/sea mask, so the
-    # network can tell land from open water. Output is just the predicted noise.
-    #base_channels: int = 64          # Reduced from 128
-    #channel_mult: Tuple = (1, 2, 2, 2)  # Reduced from (1, 2, 2, 2, 4)
-    #num_res_blocks: int = 1          # Reduced from 2
-    # attention_levels governs the down/up paths only; mid_attention governs the
-    # bottleneck. Level 3 (the last down-level, no further downsample) sits at
-    # the same 152x152 = 23k tokens as the bottleneck, so it costs the same as
-    # mid_attention -- cheap with the fused SDPA kernel (see AttentionBlock in
-    # models/unet.py). Levels 0-2 are 16x/256x/4100x more tokens^2 and are NOT
-    # enabled here: memory-efficient attention removes the O(N^2) *memory* cost
-    # but not the O(N^2) *compute* cost, so those levels would still be
-    # prohibitively slow. See docs/architecture.md.
-    #attention_levels: Tuple = ()   # Down/up attention at 152x152, same cost as mid_attention.
-    #mid_attention: bool = True       # Bottleneck attention re-enabled: needed for globally
-    # coherent large-scale structure (winter ice sheets); see docs/architecture.md.
-    in_channels: int = 2
     out_channels: int = 1
     dropout: float = 0.1
     groups: int = 8
-    time_emb_dim: int = 64 
-    channels = [32, 64, 128, 128]
-
+    time_emb_dim: int = 64
+    channels: list = field(default_factory=lambda: [64, 128, 128, 128])
+    n_res_blocks: int = 1
 
 
 @dataclass
@@ -97,11 +76,11 @@ class TrainConfig:
     training_type: str = "ddpm" #"unet", "ddpm"
 
     #Forecasting settings: 
-    forecasting_slice = TEST_SLICE #Set to None if forecasting should be disabled
+    forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
      
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-with_monthly_emb_WEST"
+    experiment_name: str = f"{training_type}-higher_channelcount"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

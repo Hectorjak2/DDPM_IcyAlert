@@ -2,14 +2,14 @@ from utils.dataloader import CARRA2
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-import os
+from plotting.plot_config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
 
 from models.models import DatasetChoice
 from models.ddpm import DDPM
-from config import UnetConfig, DDPMConfig, TrainConfig
+from config import DDPMConfig
 
 dataset = DatasetChoice.CARRA_WEST
-train_ds = train_ds = CARRA2("siconc", "mps", area=dataset, batch_dim=False)
+train_ds = CARRA2("siconc", "mps", area=dataset, batch_dim=False)
 selected_vars = torch.linspace(0, 100, 60, dtype=torch.int)
 
 x0 = train_ds[selected_vars]
@@ -20,7 +20,7 @@ scales = [64, 128, 256, 512]
 timesteps = 1000
 t_values = torch.linspace(0, timesteps-1, 30, dtype=torch.int)
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
+fig, axes = plt.subplots(1, 2, sharey=True)
 
 water = train_ds.finite_mask  # [1, H, W], 1=water, 0=land
 def masked_pool(x, k):
@@ -38,20 +38,20 @@ for ax, schedule in zip(axes, ["linear", "shifted_cosine"]):
         shift_ref_resolution=DDPMConfig.shift_ref_resolution,
     )
 
-    for k in scales:
+    for k, color, marker in zip(scales, COLORS, MARKERS):
         a = masked_pool(x0, k)
         corr_per_t = []
         for t in t_values:
             xt = ddpm.q_sample(x0=x0, t=int(t))[0].reshape(x0.shape)
             b = masked_pool(xt, k)
             corr_per_t.append(torch.corrcoef(torch.stack([a, b]))[0, 1].item())
-        ax.plot(t_values, corr_per_t, marker="o", markersize=3, label=f"k={k}")
+        ax.plot(t_values, corr_per_t, color=color, marker=marker, label=f"k={k}")
 
-    ax.set_title(schedule)
+    ax.set_title(schedule.replace("_", " ").capitalize())
     ax.set_xlabel("timestep t")
-    ax.axhline(0.0, color="black", linewidth=0.8, linestyle="--")
+    ax.axhline(0.0, color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE)
     ax.legend()
 
-axes[0].set_ylabel("corr(pool(x_t), pool(x0))")
-fig.tight_layout()
-fig.savefig("utils/schedule_analysis.png", dpi=150)
+axes[0].set_ylabel(r"corr($\mathrm{pool}(x_t)$, $\mathrm{pool}(x_0)$)")
+
+savefig(fig, "figures", "schedule_analysis", width=TEXTWIDTH_IN, height=2.8)
