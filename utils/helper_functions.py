@@ -7,6 +7,7 @@ from models.ddpm import DDPM, ConditionalDDPM
 from config import UnetConfig, DDPMConfig, TrainConfig 
 from utils.dataloader import to_data_range
 
+import torch
 import random
 
 def schedule_summary(ddpm: DDPM) -> str:
@@ -64,6 +65,49 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
 
         #dump the samples after each iteration
         pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+
+@torch.no_grad()
+def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainConfig):
+    """Deterministic UNet baseline. Saves (samples, contexts, targets, times) in [0, 1] with
+    land as NaN -- the same layout as download_conditional_samples, minus sampling_losses."""
+    print("Sampling from the trained model ...")
+
+    # test_ds must carry the *training* statistics (see train_unet in main.py).
+    mean, std = float(test_ds.mean), float(test_ds.std)
+
+    def de_standardize(x):
+        return x * std + mean
+
+    model.eval()
+    Path(f"results/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
+
+    samples = []
+    contexts = []
+    targets = []
+    times = []
+    for i in tqdm(range(n_of_samples)):
+        idx = random.randrange(len(test_ds))
+        sample, month = test_ds[idx]   # [3, H, W] = (k+1, k, k-1), standardized; month of k+1 (0-11)
+        context = sample[1:]           # (k, k-1) — what you condition on, NaN on land
+        target  = sample[:1]           # k+1 — ground truth, for comparison only, NaN on land
+        times.append(test_ds.get_dates(idx))
+
+        # Same input as training: NaN -> 0 (= the training mean), plus the land mask channel.
+        x = torch.cat([context.nan_to_num(0.0).unsqueeze(0),
+                       model.mask_channel.expand(1, -1, -1, -1)], dim=1)
+        t = torch.zeros(1, device=context.device)
+        pred = model(x, t, month.unsqueeze(0))  # [1, 1, H, W], standardized
+
+        # Back to SIC, clamped like the DDPM output, land set to NaN.
+        pred = de_standardize(pred).clamp(0.0, 1.0).masked_fill(~model.water_mask, float("nan"))
+
+        samples.append(pred.cpu())
+        targets.append(de_standardize(target).cpu())
+        contexts.append(de_standardize(context).cpu())
+
+        #dump the samples after each iteration
+        pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+
 
 
 def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM) -> Path:

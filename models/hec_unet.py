@@ -268,3 +268,4 @@ def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: 
         print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}")
 
     model.save_weights(f"results/{experiment_name}/final_weights.pth")
+    return model

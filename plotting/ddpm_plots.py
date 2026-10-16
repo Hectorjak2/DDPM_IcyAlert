@@ -92,7 +92,7 @@ def _clean_image_axis(ax):
 
 def _show_field(ax, field):
     return ax.imshow(field, cmap=SIC_CMAP, vmin=0.0, vmax=1.0, origin="lower",
-                     interpolation="nearest")
+                     interpolation="none")
 
 
 def plot_sampling_loss(data, out_dir):

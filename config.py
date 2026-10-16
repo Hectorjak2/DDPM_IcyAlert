@@ -73,17 +73,17 @@ class TrainConfig:
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
     #DDPM or Unet
-    training_type: str = "ddpm" #"unet", "ddpm"
+    training_type: str = "unet" #"unet", "ddpm"
 
     #Forecasting settings: 
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-double_res_upsample"
+    experiment_name: str = f"{training_type}-no_att_baseline"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 8
+    number_of_samples: int = 10
     sampling: bool = True
 

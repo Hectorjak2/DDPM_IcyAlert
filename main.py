@@ -1,7 +1,7 @@
 import torch
 from utils import CARRA2, FashionMNIST, CARRA2Forecast, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
-from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary, download_conditional_samples
+from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary, download_conditional_samples, download_unet_samples
 
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
@@ -147,10 +147,16 @@ def train_unet(dataset: DatasetChoice,
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
-    train(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name)
+    model = train(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name)
 
+    test_ds = CARRA2Forecast("siconc", device, area=TrainConfig.dataset, time_slice=TrainConfig.forecasting_slice, batch_dim=False, standardize=True)
+    test_ds.mean, test_ds.std = train_ds.mean, train_ds.std  # the model was trained on these
+    download_unet_samples(model, test_ds, TrainConfig.number_of_samples, TrainConfig)
+
+    config_path = dump_config_snapshot(TrainConfig, ddpm)
+    print(f"Wrote config snapshot to {config_path}")
+    
     return model
-
 
 if __name__ == "__main__":
     if TrainConfig.training_type == "unet": 
