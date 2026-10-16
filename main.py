@@ -73,12 +73,13 @@ def train_ddpm(dataset: DatasetChoice,
     unet_cfg = UnetConfig()
 
     model = SimpleUnet(
-        in_channels=unet_cfg.in_channels if not forecast_period else 4,
+        in_channels=4,
         out_channels=unet_cfg.out_channels,
         channels=unet_cfg.channels,
         time_emb_dim=unet_cfg.time_emb_dim,
         dropout=unet_cfg.dropout, 
         groups=unet_cfg.groups,
+        n_res_blocks=unet_cfg.n_res_blocks,
     )
 
     print("Training the model... ")
@@ -139,6 +140,7 @@ def train_unet(dataset: DatasetChoice,
                 time_emb_dim=unet_cfg.time_emb_dim,
                 dropout=unet_cfg.dropout, 
                 groups=unet_cfg.groups,
+                n_res_blocks=unet_cfg.n_res_blocks,
                 land_mask=train_ds.finite_mask,
                 device=device
             )

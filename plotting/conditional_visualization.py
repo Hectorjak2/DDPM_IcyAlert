@@ -107,6 +107,6 @@ def visualize_conditional_samples(
 
 
 if __name__ == "__main__":
-    result_set = "ddpm-with_monthly_emb_WEST"
+    result_set = "ddpm-higher_channelcount"#"ddpm-higher_channelcount"  
     finite_mask = torch.load("plotting/finite_WEST.pt")
     visualize_conditional_samples(f"results/{result_set}/samples.pkl", finite_mask=finite_mask)

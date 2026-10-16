@@ -80,7 +80,7 @@ class TrainConfig:
      
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-higher_channelcount"
+    experiment_name: str = f"{training_type}-p1_resblocks_on_upsample"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

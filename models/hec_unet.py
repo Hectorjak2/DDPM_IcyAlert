@@ -110,8 +110,9 @@ class ResidualBlock(nn.Module):
         h = self.activation(self.norm1(x))
         h = self.conv1(h)
 
-        t_emb_proj = self.time_emb_proj(t_emb)[:, :, None, None]  # reshape to [B, C, 1, 1]
-        m_emb_proj = self.month_emb_proj(m_emb)[:, :, None, None]  # reshape to [B, C, 1, 1]
+        # SiLU before projecting: the embedding MLPs end in a Linear, so without it the two Linears collapse into one
+        t_emb_proj = self.time_emb_proj(self.activation(t_emb))[:, :, None, None]  # reshape to [B, C, 1, 1]
+        m_emb_proj = self.month_emb_proj(self.activation(m_emb))[:, :, None, None]  # reshape to [B, C, 1, 1]
 
         h = h + t_emb_proj + m_emb_proj
 
@@ -125,7 +126,7 @@ class SimpleUnet(BaseUnet):
     """
     A simple U-Net architecture
     """
-    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0, land_mask: torch.Tensor = None, device: str = "mps"): 
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0, land_mask: torch.Tensor = None, device: str = "mps", n_res_blocks: int = 1): 
         super().__init__()
         self.device = device
         self.channels = channels
@@ -146,33 +147,35 @@ class SimpleUnet(BaseUnet):
         self.base_channel = channels[0]
 
         self.in_conv = nn.Conv2d(in_channels, self.base_channel, 3, padding=1)
+        emb = time_emb_dim * 4  # after the MLP, the embedding dimension is expanded to 4x
 
         #downsampling path
         self.down_blocks = nn.ModuleList()
         prev_channels = self.base_channel 
-        skip_chs = []  # after in_conv
-        for ch in self.channels:
-            self.down_blocks.append(nn.ModuleList([
-                ResidualBlock(prev_channels, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
-                #ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
-                Downsampling(ch, ch)]))
-            skip_chs.append(ch)
-            prev_channels = ch
+        skip_chs = [prev_channels]  # after in_conv
+        for level, ch in enumerate(self.channels):
+            for _ in range(n_res_blocks):
+                self.down_blocks.append(ResidualBlock(prev_channels, ch, emb, emb, groups, dropout))
+                prev_channels = ch
+                skip_chs.append(ch)
+
+            if level != len(self.channels) - 1:  # no downsample after the last level
+                self.down_blocks.append(Downsampling(ch, ch))
+                skip_chs.append(ch)
 
         #bottleneck
-        self.bottleneck = nn.ModuleList()
-        self.bottleneck.append(ResidualBlock(prev_channels, prev_channels, time_emb_dim * 4, time_emb_dim * 4, groups, dropout))
-        self.bottleneck.append(ResidualBlock(prev_channels, prev_channels, time_emb_dim * 4, time_emb_dim * 4, groups, dropout))
+        self.bottleneck = nn.ModuleList([
+            ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
+            ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
 
         #upsampling path
         self.up_blocks = nn.ModuleList()
-        for ch in reversed(self.channels):
-            self.up_blocks.append(nn.ModuleList([
-                Upsampling(prev_channels, ch), 
-                ResidualBlock(ch + skip_chs.pop(), ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout),
-                #ResidualBlock(ch, ch, time_emb_dim * 4, time_emb_dim * 4, groups, dropout)                                   
-                ]))
-            prev_channels = ch
+        for level, ch in reversed(list(enumerate(self.channels))):
+            for _ in range(n_res_blocks + 1):  # one ResBlock per skip saved at this level
+                self.up_blocks.append(ResidualBlock(prev_channels + skip_chs.pop(), ch, emb, emb, groups, dropout))
+                prev_channels = ch
+            if level != 0:  # no upsample after the full-resolution level
+                self.up_blocks.append(Upsampling(ch, ch))
 
         assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
 
@@ -194,30 +197,24 @@ class SimpleUnet(BaseUnet):
             self.water_mask = None
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, month: torch.Tensor):
-        x = self.in_conv(x)
-
         t_emb = self.time_mlp(t.float())
         m_emb = self.month_mlp(month.float())
+        
+        x = self.in_conv(x)
+        skip_connections = [x]
 
-        #downsampling
-        skip_connections = []
-        for res1, downsample in self.down_blocks:
-            x = res1(x, t_emb, m_emb)
-            #x = res2(x, t_emb, m_emb)
+        for block in self.down_blocks:
+            x = block(x, t_emb, m_emb) if isinstance(block, ResidualBlock) else block(x)
             skip_connections.append(x)
-            x = downsample(x)
 
-        #bottleneck
         for block in self.bottleneck:
             x = block(x, t_emb, m_emb)
 
-        #upsampling
-        for upsample, res1 in self.up_blocks:
-            x = upsample(x)
-            skip_x = skip_connections.pop()
-            x = torch.cat([x, skip_x], dim=1)  # concatenate along channel dimension
-            x = res1(x, t_emb, m_emb)
-            #x = res2(x, t_emb, m_emb)
+        for block in self.up_blocks:
+            if isinstance(block, ResidualBlock):
+                x = block(torch.cat([x, skip_connections.pop()], dim=1), t_emb, m_emb)
+            else:
+                x = block(x)
 
         assert not skip_connections, f"skip connection bookkeeping mismatch: {skip_connections}"
         
@@ -230,13 +227,14 @@ def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: 
 
     for epoch in range(epochs):
         total_loss = 0.0
+        total_p = 0.0
         for step, batch in enumerate(dataloader):
             batch, month = batch
             batch = batch.to(device)
             month = month.to(device)
             batch = torch.nan_to_num(batch, nan=0.0)  # Replace NaNs with zeros
             
-            target = batch[:, 0]  # target is the first channel (k+1)
+            target = batch[:, 0:1]  # target is the first channel (k+1); keep [B, 1, H, W] so it doesn't broadcast against pred
 
             assert model.mask_channel is not None, "Land mask channel is not set in the model."
             x = torch.concat([batch[:,1:], model.mask_channel.expand(batch.shape[0], -1, -1, -1)], dim=1)  #keeping only the context (k, k-1) and removing the target (k+1) from the input to the model. Concatenating the land mask channel
@@ -245,14 +243,22 @@ def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: 
             t = torch.Tensor([0]).to(device)
 
             pred = model(x, t, month)
-
+            
+            assert pred.shape == target.shape
             se = (pred - target) ** 2
             loss = se[model.water_mask.expand_as(se)].mean()
-            
+
+            with torch.no_grad():
+                se_p = (batch[:, 1:2] - target) ** 2          # persistence: x(k+1) = x(k)
+                loss_p = se_p[model.water_mask.expand_as(se_p)].mean()
+
             total_loss += loss.item()
-
-            print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} ")#(t={t.tolist()})")
-
+            total_p += loss_p.item()                          # init total_p = 0.0 next to total_loss
+            print(f"Epoch {epoch} step {step} -- loss {loss.item():.4f}")
+            if step % 50 == 0:
+                print(f"Epoch {epoch} step {step} -- loss {total_loss/(step+1):.4f}  "
+                    f"persistence {total_p/(step+1):.4f}  ratio {total_loss/max(total_p,1e-8):.3f}")
+            
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
