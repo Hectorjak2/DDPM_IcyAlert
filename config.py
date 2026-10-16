@@ -77,7 +77,7 @@ class TrainConfig:
 
     #Forecasting settings: 
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
-     
+    
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
     experiment_name: str = f"{training_type}-p1_resblocks_on_upsample"

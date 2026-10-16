@@ -1,5 +1,11 @@
 """
-PlotNeuralNet diagram of SimpleUnet (models/hec_unet.py), default channels [32, 64, 96, 128].
+PlotNeuralNet diagram of SimpleUnet (models/hec_unet.py), with channels and n_res_blocks read from
+UnetConfig (config.py), so the figure follows the network that actually trains.
+
+Layout mirrors SimpleUnet: per level, n_res_blocks ResBlocks then a Downsample (none on the last
+level); bottleneck of 2 ResBlocks; per decoder level, n_res_blocks + 1 ResBlocks then an Upsample
+(none on level 0). Skips are drawn from the same push/pop order as SimpleUnet.forward: in_conv,
+every encoder ResBlock and every Downsample push one; every decoder ResBlock pops one.
 
 Usage (from the repo root):
     python3 plotting/simple_unet_arch.py   # -> figures/simple_unet.pdf
@@ -26,13 +32,29 @@ sys.path.append(PNN)
 sys.path.append(os.path.abspath(os.path.join(HERE, "..")))
 from pycore.tikzeng import *  # noqa: E402
 from plotting.plot_config import TEXTWIDTH_IN, FONTSIZE, COLORS  # noqa: E402
+from config import UnetConfig  # noqa: E402
 
-channels = [32, 64, 128, 128]
-sizes = [1216, 608, 304, 152]       # spatial size at each level (128x128 TEST crop)
-heights = [40, 32, 24, 18]      # drawn size, proportional to spatial size
+_cfg = UnetConfig()
+channels = list(_cfg.channels)
+N_RES = _cfg.n_res_blocks
+sizes = [1216 // 2 ** i for i in range(len(channels))]  # spatial size at each level (1216x1216 WEST grid)
+heights = [40, 32, 24, 18]      # drawn size, shrinking with spatial size
+assert len(heights) == len(channels), "add a drawn height per level"
 OPACITY = 0.6    # alpha of every block (and legend swatch)
 GAP = "(2,0,0)"   # spacing between stages
+STEP = "(1,0,0)"  # spacing between ResBlocks within a stage
 NEAR = "(0,0,0)"  # spacing between a stage and its down/up block
+RES_W = 3         # drawn width of a ResBlock box
+UNIT = 0.2        # cm per height unit (IMG = 8cm is drawn as 40 units)
+ZY = 0.385        # vertical rise per cm of depth in PlotNeuralNet's 3D view (TikZ default z vector)
+# Skip arcs of level i run from SKIP_MARGIN to SKIP_MARGIN + SKIP_SPREAD above the highest far corner
+# they start from or pass over; this stays below the arcs of level i-1 for the default heights.
+SKIP_MARGIN, SKIP_SPREAD = 0.3, 0.4
+
+
+def far_top(h):
+    """Height (cm) of the far top edge of a box with height = depth = h units."""
+    return h * UNIT / 2 * (1 + ZY)
 
 # House palette from plot_config: conv teal, ResBlock orange, down golden, up slate
 _CONV, _POOL, _RES, _UP = (c.lstrip("#") for c in (COLORS[0], COLORS[1], COLORS[2], COLORS[3]))
@@ -66,47 +88,77 @@ if HAVE_IMAGES:
                              width=IMG, height=IMG, name=f"in{n}"))
     arch.append(rf"\node[anchor=north] at ({-IO_GAP - STACK_DX * (len(IN_IMAGES) - 1) / 2},-5.5) {{{len(IN_IMAGES)}$\times$1216$^2$}};")
 
+def res_block(name, level, offset, to, label):
+    """One ResBlock as a single box. Only one box per stage is labelled: labels under adjacent
+    0.6cm-wide boxes would overlap at 10pt, and a stage shares size and channels."""
+    h = heights[level]
+    # channels only: the spatial size follows from the Downsample/Upsample blocks (in/out images give 1216^2)
+    labels = f"xlabel={{{{{channels[level]}, }}}}," if label else ""
+    return rf"""
+\pic[shift={{{offset}}}] at {to}
+    {{Box={{name={name}, caption= , {labels} fill=\ResColor, height={h}, width={RES_W}, depth={h}}}}};
+"""
+
+
+def skip(of, to, y):
+    """Concat skip: straight up from `of`, across at height y (cm), down into `to`."""
+    return (rf"\draw [copyconnection] ({of}-north) -- ({of}-north |- 0,{y:.2f}) "
+            rf"-- node {{\copymidarrow}} ({to}-north |- 0,{y:.2f}) -- ({to}-north);")
+
+
 # input conv
-arch.append(to_Conv("inconv", sizes[0], 32, offset="(0,0,0)", to="(0,0,0)",
+arch.append(to_Conv("inconv", "", channels[0], offset="(0,0,0)", to="(0,0,0)",
                     height=40, depth=40, width=2, caption=" "))
 if HAVE_IMAGES:
     arch.append(rf"\draw [connection] ({-IO_GAP},0,0) -- (inconv-west);")
 prev = "inconv"
+skip_stack = [("inconv", 0)]  # (block, level whose resolution its output has), as in SimpleUnet.forward
 
-# One channel label (output channels) per ResBlock pair, under its second box: two labels under
-# 0.4cm-wide boxes would overlap at 10pt. (PlotNeuralNet's label array only accepts numbers.)
-# down path: 2 x ResBlock, stride-2 conv downsample
-for i, ch in enumerate(channels):
-    h = heights[i]
-    arch.append(to_ConvConvRelu(f"d{i}", s_filer=sizes[i], n_filer=("", ch), offset=GAP,
-                                to=f"({prev}-east)", width=(2, 2), height=h, depth=h,
-                                caption=" "))
-    arch.append(to_connection(prev, f"d{i}"))
-    arch.append(to_Pool(f"p{i}", offset=NEAR, to=f"(d{i}-east)",
-                        width=1, height=h - 4, depth=h - 4, caption=" ", opacity=OPACITY))
-    prev = f"p{i}"
+# down path: N_RES x ResBlock, stride-2 conv downsample (not on the last level)
+for i in range(len(channels)):
+    for k in range(N_RES):
+        name = f"d{i}_{k}"
+        arch.append(res_block(name, i, GAP if k == 0 else STEP, f"({prev}-east)", label=k == N_RES - 1))
+        arch.append(to_connection(prev, name))
+        skip_stack.append((name, i))
+        prev = name
+    if i != len(channels) - 1:
+        h = heights[i]
+        arch.append(to_Pool(f"p{i}", offset=NEAR, to=f"({prev}-east)",
+                            width=1, height=h - 4, depth=h - 4, caption=" ", opacity=OPACITY))
+        skip_stack.append((f"p{i}", i + 1))  # its output is already at the next level's resolution
+        prev = f"p{i}"
 
-# bottleneck
-arch.append(to_ConvConvRelu("bn", s_filer=76, n_filer=("", 128), offset=GAP,
-                            to=f"({prev}-east)", width=(3, 3), height=12, depth=12,
-                            caption=" "))
-arch.append(to_connection(prev, "bn"))
-prev = "bn"
+# bottleneck: 2 x ResBlock at the last level's resolution
+for k in range(2):
+    name = f"bn{k}"
+    arch.append(res_block(name, len(channels) - 1, GAP if k == 0 else STEP, f"({prev}-east)", label=k == 1))
+    arch.append(to_connection(prev, name))
+    prev = name
 
-# up path: upsample, concat skip, 2 x ResBlock
-for j, i in enumerate(reversed(range(len(channels)))):
-    ch, h = channels[i], heights[i]
-    arch.append(to_UnPool(f"u{j}", offset=GAP, to=f"({prev}-east)",
-                          width=1, height=h - 4, depth=h - 4, caption=" ", opacity=OPACITY))
-    arch.append(to_connection(prev, f"u{j}"))
-    arch.append(to_ConvConvRelu(f"r{j}", s_filer=sizes[i], n_filer=("", ch), offset=NEAR,
-                                to=f"(u{j}-east)", width=(2, 2), height=h, depth=h,
-                                caption=" "))
-    arch.append(to_skip(of=f"d{i}", to=f"r{j}", pos=1.25))
-    prev = f"r{j}"
+# up path: (N_RES + 1) x [concat skip, ResBlock], then upsample (not on level 0)
+for i in reversed(range(len(channels))):
+    # highest box under this level's arcs: its own boxes, or the Downsample/in_conv the outer arc starts at
+    clear = max(far_top(heights[i]), far_top(heights[i - 1] - 4) if i > 0 else far_top(40))
+    for k in range(N_RES + 1):
+        name = f"r{i}_{k}"
+        # label the first box: the stage ends in an Upsample taller than the boxes, which would cover the labels
+        arch.append(res_block(name, i, GAP if k == 0 else STEP, f"({prev}-east)", label=k == 0))
+        arch.append(to_connection(prev, name))
+        src, src_level = skip_stack.pop()
+        assert src_level == i, f"skip {src} (level {src_level}) popped at level {i}"
+        # first pop is the innermost source, so it gets the lowest arc
+        arch.append(skip(src, name, clear + SKIP_MARGIN + k * SKIP_SPREAD / N_RES))
+        prev = name
+    if i != 0:
+        h = heights[i - 1]  # mirrors the Downsample between levels i-1 and i
+        arch.append(to_UnPool(f"u{i}", offset=NEAR, to=f"({prev}-east)",
+                              width=1, height=h - 4, depth=h - 4, caption=" ", opacity=OPACITY))
+        prev = f"u{i}"
+assert not skip_stack, f"unused skips: {skip_stack}"
 
 # output conv (GroupNorm + SiLU + 3x3 conv to 1 channel), mirrors the input conv
-arch.append(to_Conv("outconv", sizes[0], 1, offset=GAP, to=f"({prev}-east)",
+arch.append(to_Conv("outconv", "", 1, offset=GAP, to=f"({prev}-east)",
                     height=40, depth=40, width=2, caption=" "))
 arch.append(to_connection(prev, "outconv"))
 if HAVE_IMAGES:
@@ -146,24 +198,12 @@ def _pdflatex(tex_path: str):
 
 
 def _patched_layers(tmp: str) -> str:
-    """Copy PlotNeuralNet's layers/ into tmp and move the spatial-size label and make ResBlocks one solid colour (PlotNeuralNet itself stays untouched).
-
-    The spatial-size label (zlabel) goes to the middle of the depth edge instead of its front end,
-    so it no longer sits on top of the channel label (xlabel, left under the front edge).
-    """
+    """Copy PlotNeuralNet's layers/ into tmp and set every block's opacity to OPACITY (PlotNeuralNet itself stays untouched)."""
     dst = os.path.join(tmp, "layers")
     shutil.copytree(os.path.join(PNN, "layers"), dst)
-    for sty in ("Box.sty", "RightBandedBox.sty"):
-        path = os.path.join(dst, sty)
-        text = open(path).read()
-        text = text.replace("depthlabel}=[pos=0,", "depthlabel}=[pos=DEPTHPOS,").replace("DEPTHPOS", "0.5")
-        text = text.replace("\\small\\zlabel", "\\zlabel")  # same font size as every other label
-        if sty == "RightBandedBox.sty":
-            # the band is drawn over the box, so with alpha it would show as a darker second tone: hide its fill
-            text = text.replace("opacity=0.4,", f"opacity={OPACITY},").replace("bandopacity=0.6,", "bandopacity=0,")
-        else:
-            text = text.replace("opacity=0.4,", f"opacity={OPACITY},")
-        open(path, "w").write(text)
+    path = os.path.join(dst, "Box.sty")
+    text = open(path).read()
+    open(path, "w").write(text.replace("opacity=0.4,", f"opacity={OPACITY},"))
     return tmp
 
 
@@ -183,9 +223,10 @@ def main(output_dir: str = os.path.join(HERE, "..", "figures"), name: str = "sim
     width_pt = TEXTWIDTH_IN * 72.27
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, "raw.tex")
-        pieces = [a.replace("\\ConvReluColor", "\\ResColor").replace("\\ConvColor", "\\ResColor")
-                  if "RightBandedBox" in a else a for a in arch]
-        pieces[0] = to_head(_patched_layers(tmp))
+        pieces = list(arch)
+        # fix-cm: Computer Modern at any size. Without it LaTeX silently caps the ~30pt drawn font at
+        # 24.88pt, and after scaling to \textwidth the text ends up well below FONTSIZE.
+        pieces[0] = "\\RequirePackage{fix-cm}\n" + to_head(_patched_layers(tmp))
         to_generate(pieces, raw)
         tex = open(raw).read()
 
