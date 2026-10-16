@@ -5,6 +5,7 @@ from pathlib import Path
 from tqdm import tqdm
 from models.ddpm import DDPM, ConditionalDDPM
 from config import UnetConfig, DDPMConfig, TrainConfig 
+from utils.dataloader import to_data_range
 
 import random
 
@@ -42,6 +43,7 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
     contexts = []
     targets = []
     times = []
+    sampling_losses = []
     for i in tqdm(range(n_of_samples)):
         idx = random.randrange(len(test_ds))
         sample, month = test_ds[idx]   # [3, H, W] = (k+1, k, k-1); month of k+1 (0-11)
@@ -49,14 +51,19 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
         target  = sample[:1]           # k+1 — ground truth, for comparison only
         times.append(test_ds.get_dates(idx))
 
-        sample = ddpm.sample(context=context, month=int(month), model=model)
+        target = to_data_range(target) #[0,1]: for the running sampling loss and for storage
+
+        sample, loss_during_sampling = ddpm.sample(context=context, month=int(month), model=model, target=target) #sample already back to [0,1] range in function
+        
+        context = to_data_range(context)  # back to [0,1] range for comparison with sample
 
         samples.append(sample.cpu())
         targets.append(target.cpu())
         contexts.append(context.cpu())
+        sampling_losses.append(loss_during_sampling)
 
         #dump the samples after each iteration
-        pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+        pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
 
 
 def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM) -> Path:

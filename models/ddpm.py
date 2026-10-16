@@ -371,8 +371,11 @@ class ConditionalDDPM(DDPM):
         return xt
 
     @torch.no_grad()
-    def sample(self, context:torch.Tensor, month: int, model):
+    def sample(self, context:torch.Tensor, month: int, model, target: Optional[torch.Tensor] = None):
         """Generate one sample, returned in data range [0, 1] with land set to NaN."""
+        if target is not None: 
+            loss_during_sampling = []
+        
         if self.water_mask is not None:
             height, width = self.water_mask.shape[-2:]
         else:
@@ -391,10 +394,16 @@ class ConditionalDDPM(DDPM):
             input_x = torch.cat([xt, context], dim=1)
             xt = self.p_sample(model, input_x, t_tensor, month_tensor)
 
+            if target is not None: 
+                se = (to_data_range(xt.clamp(-1.0, 1.0)) - target.nan_to_num(nan=0.0).unsqueeze(1)) ** 2
+                loss = se[self.water_mask.expand_as(se)].mean()
+                loss_during_sampling.append(loss.item())
+
+
         # Back from the model's [-1, 1] range to concentrations in [0, 1]
         xt = to_data_range(xt.clamp(-1.0, 1.0))
 
         if self.water_mask is not None:
             xt = xt.masked_fill(~self.water_mask, float("nan"))
 
-        return xt
+        return xt if target is None else (xt, loss_during_sampling)
