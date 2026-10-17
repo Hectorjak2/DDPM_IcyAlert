@@ -6,7 +6,6 @@
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 12:00
 #BSUB -R "rusage[mem=40GB]"
-#BSUB -R "select[gpu48gb]"
 
 #BSUB -u hectorheltj@gmail.com
 #BSUB -B
