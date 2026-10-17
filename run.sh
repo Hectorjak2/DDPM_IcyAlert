@@ -1,8 +1,8 @@
 #!/bin/sh
 
 ### General options
-#BSUB -q gpul40s
-#BSUB -n 4
+#BSUB -q gpuv100
+#BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 12:00
 #BSUB -R "rusage[mem=40GB]"
