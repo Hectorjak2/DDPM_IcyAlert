@@ -2,7 +2,7 @@
 
 ### General options
 #BSUB -q gpuv100
-#BSUB -n 4
+#BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 12:00
 #BSUB -R "rusage[mem=32GB]"
