@@ -80,10 +80,10 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-no_att_baseline"
+    experiment_name: str = f"{training_type}-get100samples"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 10
+    number_of_samples: int = 100
     sampling: bool = True
 

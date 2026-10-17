@@ -31,6 +31,7 @@ SIC_CMAP = plt.cm.Blues_r.copy()
 SIC_CMAP.set_bad("lightgray")
 
 N_BINS = 100  # 0.01-wide target-SIC bins for the calibration plot
+MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration curves
 
 
 def _month(date) -> str:
@@ -117,7 +118,13 @@ def plot_sampling_loss(data, out_dir):
 
 
 def plot_calibration(data, out_dir):
-    """Mean prediction per target-SIC bin, pooled over all water pixels of all samples."""
+    """Prediction per target-SIC bin, pooled over all water pixels of all samples.
+
+    Shows mean, median and interquartile range rather than mean +- std: within a bin the
+    predictions are bimodal (a misplaced ice edge gives ~0 or ~1 where the target is
+    intermediate), so the std sits near its 0/1-mixture maximum in every bin and says
+    little, while the quartiles show the split.
+    """
     target = np.concatenate([t.ravel() for t in data["targets"]]).astype(np.float64)
     pred = np.concatenate([p.ravel() for p in data["predictions"]]).astype(np.float64)
     valid = np.isfinite(target) & np.isfinite(pred)
@@ -126,23 +133,34 @@ def plot_calibration(data, out_dir):
     # SIC exactly 1.0 goes in the last bin rather than a 101st one.
     bins = np.clip((target * N_BINS).astype(np.int64), 0, N_BINS - 1)
     counts = np.bincount(bins, minlength=N_BINS)
-    sums = np.bincount(bins, weights=pred, minlength=N_BINS)
-    sq_sums = np.bincount(bins, weights=pred ** 2, minlength=N_BINS)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        mean = sums / counts
-        std = np.sqrt(np.maximum(sq_sums / counts - mean ** 2, 0.0))
+    # Group predictions by bin with one sort instead of a boolean mask per bin.
+    per_bin = np.split(pred[np.argsort(bins, kind="stable")], np.cumsum(counts)[:-1])
+    stats = np.full((N_BINS, 4), np.nan)  # mean, q25, median, q75
+    for k, p in enumerate(per_bin):
+        if p.size:
+            stats[k] = [p.mean(), *np.percentile(p, [25, 50, 75])]
     centers = (np.arange(N_BINS) + 0.5) / N_BINS
+
+    # CARRA2 has (almost) no SIC between 0 and ~0.05, which leaves the 0-0.01 bin -- the
+    # bulk of all water pixels -- isolated between empty bins, and a line does not draw
+    # through NaNs. Curves therefore run through the populated bins only, bridging the gap;
+    # the count panel below shows that the bridged bins are (near-)empty. Bins with only a
+    # handful of pixels are bridged too: their quantiles are noise and draw spurious kinks.
+    filled = counts >= MIN_BIN_PIXELS
+    mean, q25, median, q75 = stats[filled].T
 
     fig, (ax, ax_n) = plt.subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]})
     ax.plot([0, 1], [0, 1], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE,
             label="perfect")
-    ax.fill_between(centers, mean - std, mean + std, color=COLORS[0], alpha=0.25,
-                    linewidth=0, label=r"$\pm 1$ std")
-    ax.plot(centers, mean, color=COLORS[0], label="mean prediction")
+    ax.fill_between(centers[filled], q25, q75, color=COLORS[0], alpha=0.25, linewidth=0,
+                    label="interquartile range")
+    ax.plot(centers[filled], mean, color=COLORS[0], label="mean")
+    ax.plot(centers[filled], median, color=COLORS[2], linewidth=1.0, label="median")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_ylabel("predicted SIC")
-    ax.legend(loc="upper left")
+    # Above the axes: inside, the band and curves leave no free corner.
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2)
 
     ax_n.bar(centers, counts, width=1 / N_BINS, color=COLORS[3], linewidth=0)
     ax_n.set_yscale("log")

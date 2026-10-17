@@ -105,8 +105,8 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
         targets.append(de_standardize(target).cpu())
         contexts.append(de_standardize(context).cpu())
 
-        #dump the samples after each iteration
-        pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+        if i%10 == 0 or i == (n_of_samples-1): 
+            pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
 
 
 

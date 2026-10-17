@@ -82,11 +82,11 @@ def train_ddpm(dataset: DatasetChoice,
         n_res_blocks=unet_cfg.n_res_blocks,
     )
 
-    print("Training the model... ")
-    ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
+    #print("Training the model... ")
+    #ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
 
-    #print("Loading model weights")
-    #model.load_weights(path="results/full_conditional_10epochs/final_Unet_CARRA2-siconc_batchsize4_t1000_epochs10_lr0.0003.pth", device=device)
+    print("Loading model weights")
+    model.load_weights(path="results/ddpm-double_res_upsample/final_weights.pth", device=device)
 
     print("Training complete...")
     if sampling: 
@@ -155,7 +155,7 @@ def train_unet(dataset: DatasetChoice,
 
     config_path = dump_config_snapshot(TrainConfig, ddpm)
     print(f"Wrote config snapshot to {config_path}")
-    
+
     return model
 
 if __name__ == "__main__":
