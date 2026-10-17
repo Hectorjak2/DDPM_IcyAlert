@@ -2,10 +2,10 @@
 
 ### General options
 #BSUB -q gpul40s
-#BSUB -n 1
+#BSUB -n 4
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 12:00
-#BSUB -R "rusage[mem=48GB]"
+#BSUB -R "rusage[mem=40GB]"
 #BSUB -R "select[gpu48gb]"
 
 #BSUB -u hectorheltj@gmail.com
