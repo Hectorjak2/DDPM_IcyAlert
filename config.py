@@ -25,7 +25,7 @@ class UnetConfig:
     time_emb_dim: int = 64
     channels: list = field(default_factory=lambda: [64, 128, 128, 128])
     n_res_blocks: int = 1
-
+    attention: bool = True
 
 @dataclass
 class DDPMConfig:
@@ -73,14 +73,14 @@ class TrainConfig:
     For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
     """
     #DDPM or Unet
-    training_type: str = "unet" #"unet", "ddpm"
+    training_type: str = "ddpm" #"unet", "ddpm"
 
     #Forecasting settings: 
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-double_res_up"
+    experiment_name: str = f"{training_type}-with_attention"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

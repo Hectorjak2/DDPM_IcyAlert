@@ -158,6 +158,18 @@ This yields ~5.8M parameters, fitting comfortably into HPC memory budgets while 
 
 Profiling both this network and a colleague's attention-free `SuperResUNet` ([models/clara_unet.py](../models/clara_unet.py)) showed their convolutional activation costs are within 3% of each other at every resolution level, so attention placement and input resolution — not channel widths or block counts — are what actually drive memory here. At batch 4, activations scale as H·W: ~40 GB at 1000×1000 versus ~61 GB at 1216×1216.
 
+### Axial Attention in `SimpleUnet`'s Bottleneck
+
+**Location:** [models/hec_unet.py](../models/hec_unet.py) `AttentionBlock`, used between the two bottleneck ResBlocks of `SimpleUnet`.
+
+Full self-attention at the 152×152 bottleneck is infeasible (see above), so `SimpleUnet` uses factorised (axial) attention instead: each pixel attends to every pixel in its row, and separately to every pixel in its column, and the two results are summed. That is O(H·W·(H+W)) rather than O((H·W)²). At `[4, 128, 152, 152]` it costs ~2 GB and ~0.3 s forward+backward on `mps`. Two layers of axial attention would give every pixel a path to every other pixel; one layer reaches only its row and column.
+
+- **Layout:** the input is permuted to channels-last `[B, H, W, C]` before reshaping into sequences. Reshaping `[B, C, H, W]` directly cuts memory in channel-major order, so the "sequences" end up as chunks of single channels rather than rows of pixels. An earlier version had exactly this bug: shapes were correct, nothing crashed, and the semantics were wrong.
+- **Projections:** q/k/v come from a full-channel `Linear(C, 3C)` and are split into heads afterwards, so each head learns its own projection. Rows and columns have separate q/k/v projections (`qkv_row`, `qkv_col`), since the two grid axes need not behave alike.
+- **Output projection:** `proj_out` is zero-initialised, so the block is the identity at init and does not perturb the residual stream early in training.
+
+Checked against a naive per-row/per-column loop (max diff ~7e-7); with the GroupNorm bypassed, perturbing one pixel changes only its row and column.
+
 ### Region Split: WEST vs. TEST
 
 **Location:** [utils/dataloader.py](../utils/dataloader.py) `CARRA2.__init__()`, lines 38–46.

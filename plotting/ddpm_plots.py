@@ -7,6 +7,8 @@ Reads ``results/<run>/samples.pkl`` written by
 2. ``calibration``    -- mean predicted SIC per 0.01 target-SIC bin (over/under-prediction).
 3. ``forecast_row``   -- k-1, k, k+1 (truth) and prediction for one sample.
 4. ``forecast_grid``  -- truth (top) vs prediction (bottom) for four samples.
+5. ``forecast_rows_melt`` / ``forecast_rows_cool`` -- four forecast rows each, one per
+   target month, spread over the melt (Apr-Sep) and cool (Oct-Mar) season.
 
 Works for both CARRA2-TEST and CARRA2-WEST without a mask file: land is already NaN in
 the pickled targets and samples, so water = ``isfinite(target)`` at whatever resolution
@@ -32,6 +34,10 @@ SIC_CMAP.set_bad("lightgray")
 
 N_BINS = 100  # 0.01-wide target-SIC bins for the calibration plot
 MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration curves
+
+# Target (k+1) months per season, in seasonal order. Same split as MELT_SEASON /
+# COOL_SEASON in config.py.
+SEASONS = {"melt": (4, 5, 6, 7, 8, 9), "cool": (10, 11, 12, 1, 2, 3)}
 
 
 def _month(date) -> str:
@@ -218,12 +224,60 @@ def plot_forecast_grid(data, out_dir, indices=None):
     plt.close(fig)
 
 
+def season_indices(data, season: str, n: int = 4) -> list[int]:
+    """Pick up to ``n`` samples whose target (k+1) month is in ``season``, one per month
+    and spread evenly over the season, in seasonal order (e.g. Apr -> Sep for melt)."""
+    months = SEASONS[season]
+    by_month = {m: [] for m in months}
+    for i, dates in enumerate(data["times"]):
+        m = pd.Timestamp(dates[0]).month
+        if m in by_month:
+            by_month[m].append(i)
+    available = [m for m in months if by_month[m]]
+    if not available:
+        return []
+    if len(available) >= n:
+        picks = np.unique(np.linspace(0, len(available) - 1, n).round().astype(int))
+        return [by_month[available[p]][0] for p in picks]
+    # Fewer months than rows: fill up with further samples, still in seasonal order.
+    return [i for m in available for i in by_month[m]][:n]
+
+
+def plot_forecast_rows(data, out_dir, indices, name: str):
+    """One forecast_row per sample, stacked: columns k-1, k, k+1 truth, prediction."""
+    n = len(indices)
+    fig = plt.figure()
+    gs = fig.add_gridspec(n, 5, width_ratios=[1, 1, 1, 1, 0.06])
+    headers = (r"$k{-}1$", r"$k$", r"$k{+}1$ truth", r"$k{+}1$ prediction")
+    for row, i in enumerate(indices):
+        fields = (data["km1"][i], data["k"][i], data["targets"][i], data["predictions"][i])
+        for col, field in enumerate(fields):
+            ax = fig.add_subplot(gs[row, col])
+            img = _show_field(ax, field)
+            _clean_image_axis(ax)
+            if row == 0:
+                ax.set_title(headers[col])
+            if col == 0:
+                # The k+1 month; k and k-1 are the one and two months before it.
+                ax.set_ylabel(_month(data["times"][i][0]))
+    fig.colorbar(img, cax=fig.add_subplot(gs[:, 4])).set_label("SIC", labelpad=4)
+
+    savefig(fig, out_dir, name, width=TEXTWIDTH_IN, height=1.45 * n + 0.4)
+    plt.close(fig)
+
+
 def make_all(path, row_index: int = 0, grid_indices=None):
     out_dir, data = load_samples(path)
     plot_sampling_loss(data, out_dir)
     plot_calibration(data, out_dir)
     plot_forecast_row(data, out_dir, index=row_index)
     plot_forecast_grid(data, out_dir, indices=grid_indices)
+    for season in SEASONS:
+        indices = season_indices(data, season)
+        if indices:
+            plot_forecast_rows(data, out_dir, indices, f"forecast_rows_{season}")
+        else:
+            print(f"No {season}-season samples -- skipping forecast_rows_{season}.")
     print(f"Wrote figures to {out_dir}/")
 
 

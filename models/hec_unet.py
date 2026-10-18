@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from models.unet import BaseUnet
 
@@ -81,6 +82,51 @@ class Upsampling(nn.Module):
 
     def forward(self, x: torch.Tensor): 
         return self.conv(self.up1(x))
+
+class AttentionBlock(nn.Module): 
+    """
+    Factorized attention block. Instead of running attention on sequence length on all pixels in the field
+    (Which at the bottle neck is 152*152=23104 => 23104^2 ~ 500 million) we factorize and compute an approximate 
+    attention row and column wise. So for each row, each pixel in the row is compared to every other in the row: 
+    (152*152*152) *2 ~7 million.
+
+    The q, k, v projections act on the full channel vector and are split into heads afterwards, so each
+    head learns its own projection. Rows and columns get separate projections. The output projection is
+    zero-initialised so the block starts as the identity and doesn't disturb the residual stream early on.
+    """
+    def __init__(self, ch: int, n_heads: int, groups: int = 8):
+        super().__init__()
+        assert ch%n_heads == 0, f"{ch} should be divisible by n_heads"
+
+        self.n_heads = n_heads
+        self._norm = nn.GroupNorm(_valid_groups(ch, groups), ch)
+        self.qkv_row = nn.Linear(ch, ch*3)
+        self.qkv_col = nn.Linear(ch, ch*3)
+        self.proj_out = nn.Linear(ch, ch)
+        nn.init.zeros_(self.proj_out.weight)
+        nn.init.zeros_(self.proj_out.bias)
+
+    def _attend(self, seq: torch.Tensor, qkv: nn.Linear):
+        """seq: [N, L, C] -> multi-head self-attention along L -> [N, L, C]"""
+        n, l, c = seq.shape
+        q, k, v = qkv(seq).reshape(n, l, 3, self.n_heads, c // self.n_heads).permute(2, 0, 3, 1, 4)  # each (N, n_heads, L, c//n_heads)
+        out = F.scaled_dot_product_attention(q, k, v)
+        return out.permute(0, 2, 1, 3).reshape(n, l, c)
+
+    def forward(self, x:torch.Tensor):
+        b, c, h, w = x.shape
+        x_old = x
+        x = self._norm(x).permute(0, 2, 3, 1)  # [B, H, W, C], channels last so a reshape groups whole pixels
+
+        #Row wise: each sequence is one row of w pixels
+        out1 = self._attend(x.reshape(b*h, w, c), self.qkv_row).reshape(b, h, w, c)
+
+        #Column wise: each sequence is one column of h pixels
+        out2 = self._attend(x.transpose(1, 2).reshape(b*w, h, c), self.qkv_col).reshape(b, w, h, c).transpose(1, 2)
+
+        out = self.proj_out(out1 + out2).permute(0, 3, 1, 2)  # back to [B, C, H, W]
+        return x_old + out
+
 
 class ResidualBlock(nn.Module): 
     """
@@ -166,6 +212,7 @@ class SimpleUnet(BaseUnet):
         #bottleneck
         self.bottleneck = nn.ModuleList([
             ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
+            AttentionBlock(prev_channels, n_heads=4, groups=groups),
             ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
 
         #upsampling path
@@ -208,7 +255,10 @@ class SimpleUnet(BaseUnet):
             skip_connections.append(x)
 
         for block in self.bottleneck:
-            x = block(x, t_emb, m_emb)
+            if isinstance(block, ResidualBlock):
+                x = block(x, t_emb, m_emb)
+            else: 
+                x = block(x)
 
         for block in self.up_blocks:
             if isinstance(block, ResidualBlock):
