@@ -5,7 +5,7 @@ import os
 SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results/samples")
 
 unet_conf = UnetConfig()
-unet_conf.attention = False
+unet_conf.attention = True
 
 train_conf = TrainConfig()
 train_conf.experiment_name = "sampling_ddpm_att"
