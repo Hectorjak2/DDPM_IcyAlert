@@ -109,7 +109,7 @@ class AttentionBlock(nn.Module):
     def _attend(self, seq: torch.Tensor, qkv: nn.Linear):
         """seq: [N, L, C] -> multi-head self-attention along L -> [N, L, C]"""
         n, l, c = seq.shape
-        q, k, v = qkv(seq).reshape(n, l, 3, self.n_heads, c // self.n_heads).permute(2, 0, 3, 1, 4)  # each (N, n_heads, L, c//n_heads)
+        q, k, v = qkv(seq).reshape(n, l, 3, self.n_heads, c // self.n_heads).permute(2, 0, 3, 1, 4)  # each  (N, n_heads, L, c//n_heads)
         out = F.scaled_dot_product_attention(q, k, v)
         return out.permute(0, 2, 1, 3).reshape(n, l, c)
 
