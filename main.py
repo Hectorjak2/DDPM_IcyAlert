@@ -171,7 +171,7 @@ def train_unet(dataset: DatasetChoice,
         download_unet_samples(model, test_ds, train_config.number_of_samples, train_config)
 
     print(f"Writing config snapshot")
-    config_path = dump_config_snapshot(train_config, model)
+    config_path = dump_config_snapshot(train_config, model, unet=True)
 
     return model
 

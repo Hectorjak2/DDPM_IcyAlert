@@ -14,6 +14,7 @@ train_conf.output_dir = SAMPLINGROOT
 model = train_ddpm(
             dataset=train_conf.dataset,
             forecast_period = train_conf.forecasting_slice,
+            timesteps=DDPMConfig.timesteps,
             batch_size=train_conf.batch_size,
             epochs=train_conf.epochs,
             lr=train_conf.lr,

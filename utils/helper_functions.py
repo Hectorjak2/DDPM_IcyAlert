@@ -116,7 +116,7 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
 
 
 
-def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM) -> Path:
+def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM, unet:bool = False) -> Path:
     """Write the config values used by this run into the run's results dir.
 
     config.py keeps changing between runs, so snapshotting the values next to the
@@ -136,8 +136,9 @@ def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM) -> Path:
             lines.append(f"    {f.name} = {getattr(cfg, f.name)!r}")
         lines.append("")
 
-    lines.append(schedule_summary(ddpm))
-    lines.append("")
+    if not unet: 
+        lines.append(schedule_summary(ddpm))
+        lines.append("")
 
     out_path.write_text("\n".join(lines))
     return out_path
