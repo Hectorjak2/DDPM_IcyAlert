@@ -6,7 +6,7 @@ from utils.helper_functions import download_samples, dump_config_snapshot, sched
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
 from models.unet import Unet, TestUnet, UnetSmall
-from models.hec_unet import SimpleUnet, train, count_parameters
+from models.hec_unet import SimpleUnet, train_network, count_parameters
 from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
 
 device = get_device()
@@ -21,6 +21,11 @@ def train_ddpm(dataset: DatasetChoice,
          download_carra2_data=False,
          experiment_name="default",
          sampling: bool = True,
+         train: bool = True, 
+         load_weights: str = None,
+         ddpm_config: DDPMConfig = DDPMConfig,
+         train_config: TrainConfig = TrainConfig,
+         unet_config: UnetConfig = UnetConfig
          ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
     
     if not isinstance(dataset, DatasetChoice):
@@ -53,8 +58,8 @@ def train_ddpm(dataset: DatasetChoice,
                 device=device,
                 image_size=train_ds[0][0].shape[-1],
                 land_mask=train_ds.finite_mask,
-                schedule=DDPMConfig.schedule,
-                shift_ref_resolution=DDPMConfig.shift_ref_resolution,
+                schedule=ddpm_config.schedule,
+                shift_ref_resolution=ddpm_config.shift_ref_resolution,
                 forecast_period=forecast_period
             ) 
     else: 
@@ -63,41 +68,42 @@ def train_ddpm(dataset: DatasetChoice,
             device=device,
             image_size=train_ds[0][0].shape[-1],
             land_mask=train_ds.finite_mask,
-            schedule=DDPMConfig.schedule,
-            shift_ref_resolution=DDPMConfig.shift_ref_resolution,
+            schedule=ddpm_config.schedule,
+            shift_ref_resolution=ddpm_config.shift_ref_resolution,
         ) 
 
     print(schedule_summary(ddpm))
 
     # Build UNet from config (see config.py for the downsized CARRA2 config).
-    unet_cfg = UnetConfig()
-
     model = SimpleUnet(
         in_channels=4,
-        out_channels=unet_cfg.out_channels,
-        channels=unet_cfg.channels,
-        time_emb_dim=unet_cfg.time_emb_dim,
-        dropout=unet_cfg.dropout, 
-        groups=unet_cfg.groups,
-        n_res_blocks=unet_cfg.n_res_blocks,
+        out_channels=unet_config.out_channels,
+        channels=unet_config.channels,
+        time_emb_dim=unet_config.time_emb_dim,
+        dropout=unet_config.dropout, 
+        groups=unet_config.groups,
+        n_res_blocks=unet_config.n_res_blocks,
+        attention=unet_config.attention,
     )
+    if load_weights: 
+        print(f"Loading model weights: {load_weights}")
+        model.load_weights(path=f"results/{load_weights}", device=device)
 
-    print("Training the model... ")
-    ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
-
-    #print("Loading model weights")
-    #model.load_weights(path="results/ddpm-double_res_upsample/final_weights.pth", device=device)
-
-    print("Training complete...")
+    if train: 
+        print("Training the model... ")
+        ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
+        print("Training complete...")
+        
     if sampling: 
-        if TrainConfig.forecasting_slice: 
-            test_ds = CARRA2Forecast("siconc", device, area=TrainConfig.dataset, time_slice=TrainConfig.forecasting_slice, batch_dim=False)
-            download_conditional_samples(ddpm, model, test_ds, TrainConfig, TrainConfig.number_of_samples)
+        print("Sampling the model...")
+        if train_config.forecasting_slice: 
+            test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False)
+            download_conditional_samples(ddpm, model, test_ds, train_config, train_config.number_of_samples)
         else: 
-            download_samples(ddpm, model, TrainConfig, TrainConfig.number_of_samples) 
-    
-    config_path = dump_config_snapshot(TrainConfig, ddpm)
-    print(f"Wrote config snapshot to {config_path}")
+            download_samples(ddpm, model, train_config, train_config.number_of_samples) 
+
+    print(f"Writing config snapshot")
+    config_path = dump_config_snapshot(train_config, ddpm)
     print("SCRIPT DONE")
 
     return model, ddpm, train_ds
@@ -110,7 +116,11 @@ def train_unet(dataset: DatasetChoice,
          verbose: bool =True,
          download_carra2_data=False,
          experiment_name="default",
-         sampling: bool = True): 
+         sampling: bool = True,
+         train: bool = True, 
+         load_weights: str = None,
+         train_config: TrainConfig = TrainConfig,
+         unet_config: UnetConfig = UnetConfig): 
     
     if not isinstance(dataset, DatasetChoice):
             raise ValueError("Please specify a valid dataset")
@@ -132,29 +142,36 @@ def train_unet(dataset: DatasetChoice,
         shuffle=True,
     )
 
-    unet_cfg = UnetConfig()
     model = SimpleUnet(
                 in_channels=3,
-                out_channels=unet_cfg.out_channels,
-                channels=unet_cfg.channels,
-                time_emb_dim=unet_cfg.time_emb_dim,
-                dropout=unet_cfg.dropout, 
-                groups=unet_cfg.groups,
-                n_res_blocks=unet_cfg.n_res_blocks,
+                out_channels=unet_config.out_channels,
+                channels=unet_config.channels,
+                time_emb_dim=unet_config.time_emb_dim,
+                dropout=unet_config.dropout, 
+                groups=unet_config.groups,
+                n_res_blocks=unet_config.n_res_blocks,
                 land_mask=train_ds.finite_mask,
-                device=device
+                device=device,
+                attention=unet_config.attention,
             )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    
-    model = train(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name)
+    if load_weights: 
+        print(f"Loading model weights: {load_weights}")
+        model.load_weights(path=f"results/{load_weights}", device=device)
 
-    test_ds = CARRA2Forecast("siconc", device, area=TrainConfig.dataset, time_slice=TrainConfig.forecasting_slice, batch_dim=False, standardize=True)
-    test_ds.mean, test_ds.std = train_ds.mean, train_ds.std  # the model was trained on these
-    download_unet_samples(model, test_ds, TrainConfig.number_of_samples, TrainConfig)
+    if train: 
+        print("Training the model...")
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        model = train_network(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name)
 
-    config_path = dump_config_snapshot(TrainConfig, model)
-    print(f"Wrote config snapshot to {config_path}")
+    if sampling: 
+        print("Sampling the model...")
+        test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False, standardize=True)
+        test_ds.mean, test_ds.std = train_ds.mean, train_ds.std  # the model was trained on these
+        download_unet_samples(model, test_ds, train_config.number_of_samples, train_config)
+
+    print(f"Writing config snapshot")
+    config_path = dump_config_snapshot(train_config, model)
 
     return model
 
@@ -167,7 +184,9 @@ if __name__ == "__main__":
             epochs=TrainConfig.epochs,
             lr=TrainConfig.lr,
             experiment_name=TrainConfig.experiment_name,
-            sampling=TrainConfig.sampling
+            sampling=TrainConfig.sampling,
+            train_config=TrainConfig,
+            unet_config=UnetConfig
         )
 
     elif TrainConfig.training_type == "ddpm":
@@ -179,5 +198,8 @@ if __name__ == "__main__":
             epochs=TrainConfig.epochs,
             lr=TrainConfig.lr,
             experiment_name=TrainConfig.experiment_name,
-            sampling=TrainConfig.sampling
+            sampling=TrainConfig.sampling, 
+            ddpm_config=DDPMConfig,
+            train_config=TrainConfig,
+            unet_config=UnetConfig
         )

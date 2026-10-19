@@ -172,10 +172,11 @@ class SimpleUnet(BaseUnet):
     """
     A simple U-Net architecture
     """
-    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0, land_mask: torch.Tensor = None, device: str = "mps", n_res_blocks: int = 1): 
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0, land_mask: torch.Tensor = None, device: str = "mps", n_res_blocks: int = 1, attention: bool = True): 
         super().__init__()
         self.device = device
         self.channels = channels
+        self.attention = attention
         self.time_mlp = nn.Sequential(
             TimestepEmbedding(time_emb_dim),
             nn.Linear(time_emb_dim, time_emb_dim * 4),
@@ -210,10 +211,15 @@ class SimpleUnet(BaseUnet):
                 skip_chs.append(ch)
 
         #bottleneck
-        self.bottleneck = nn.ModuleList([
-            ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
-            AttentionBlock(prev_channels, n_heads=4, groups=groups),
-            ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
+        if self.attention: 
+            self.bottleneck = nn.ModuleList([
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
+                AttentionBlock(prev_channels, n_heads=4, groups=groups),
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
+        else: 
+            self.bottleneck = nn.ModuleList([
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
 
         #upsampling path
         self.up_blocks = nn.ModuleList()
@@ -270,7 +276,7 @@ class SimpleUnet(BaseUnet):
         
         return self.final_conv(F.silu(self.final_norm(x)))
 
-def train(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default"):
+def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default"):
     model.to(device)
     model.train()
     os.makedirs(f"results/{experiment_name}", exist_ok=True)

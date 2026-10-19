@@ -31,22 +31,26 @@ def download_samples(ddpm: DDPM, model, train_cfg: TrainConfig, n_of_samples: in
         samples.append(sample.cpu())
 
         #dump the samples after each iteration
-        pickle.dump(samples, open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+        pickle.dump(samples, open(f"results/{train_cfg.experiment_name}/{train_cfg.experiment_name}_samples.pkl", "wb"))
 
 def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainConfig, n_of_samples: int = 10):
     print("Sampling from the trained model ...")
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
-    Path(f"results/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
+    outdir = train_cfg.output_dir
+
+    Path(outdir).mkdir(parents=True, exist_ok=True)
 
     samples = []
     contexts = []
     targets = []
     times = []
     sampling_losses = []
+    # Own RNG so the drawn dates depend only on the seed, not on earlier use of the global one.
+    date_rng = random.Random(train_cfg.sample_seed)
     for i in tqdm(range(n_of_samples)):
-        idx = random.randrange(len(test_ds))
+        idx = date_rng.randrange(len(test_ds))
         sample, month = test_ds[idx]   # [3, H, W] = (k+1, k, k-1); month of k+1 (0-11)
         context = sample[1:]           # (k, k-1) — what you condition on
         target  = sample[:1]           # k+1 — ground truth, for comparison only
@@ -64,29 +68,31 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
         sampling_losses.append(loss_during_sampling)
 
         #dump the samples after each iteration
-        pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+        pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"{outdir}/{train_cfg.experiment_name}_samples.pkl", "wb"))
 
 @torch.no_grad()
 def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainConfig):
     """Deterministic UNet baseline. Saves (samples, contexts, targets, times) in [0, 1] with
     land as NaN -- the same layout as download_conditional_samples, minus sampling_losses."""
     print("Sampling from the trained model ...")
-
+    outdir = train_cfg.output_dir
     # test_ds must carry the *training* statistics (see train_unet in main.py).
     mean, std = float(test_ds.mean), float(test_ds.std)
-
+    
     def de_standardize(x):
         return x * std + mean
 
     model.eval()
-    Path(f"results/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
+    Path(outdir).mkdir(parents=True, exist_ok=True)
 
     samples = []
     contexts = []
     targets = []
     times = []
+    # Own RNG so the drawn dates depend only on the seed, not on earlier use of the global one.
+    date_rng = random.Random(train_cfg.sample_seed)
     for i in tqdm(range(n_of_samples)):
-        idx = random.randrange(len(test_ds))
+        idx = date_rng.randrange(len(test_ds))
         sample, month = test_ds[idx]   # [3, H, W] = (k+1, k, k-1), standardized; month of k+1 (0-11)
         context = sample[1:]           # (k, k-1) — what you condition on, NaN on land
         target  = sample[:1]           # k+1 — ground truth, for comparison only, NaN on land
@@ -106,7 +112,7 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
         contexts.append(de_standardize(context).cpu())
 
         if i%10 == 0 or i == (n_of_samples-1): 
-            pickle.dump((samples, contexts, targets, times), open(f"results/{train_cfg.experiment_name}/samples.pkl", "wb"))
+            pickle.dump((samples, contexts, targets, times), open(f"{outdir}/{train_cfg.experiment_name}_samples.pkl", "wb"))
 
 
 

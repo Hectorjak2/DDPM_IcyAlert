@@ -85,5 +85,9 @@ class TrainConfig:
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 100
+    sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     sampling: bool = True
+
+    #Saving samples setting 
+    output_dir: str = f"results/{experiment_name}"
 
