@@ -63,7 +63,7 @@ def load_samples(path: str | Path):
     """
     path = Path(path)
     if path.suffix != ".pkl":
-        path = (path if path.exists() else Path("results") / path) / "samples.pkl"
+        path = (path if path.exists() else Path("results") / path) / "sampling_ddpm_att_samples.pkl"
 
     with open(path, "rb") as f:
         payload = pickle.load(f)

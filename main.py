@@ -185,8 +185,8 @@ if __name__ == "__main__":
             lr=TrainConfig.lr,
             experiment_name=TrainConfig.experiment_name,
             sampling=TrainConfig.sampling,
-            train_config=TrainConfig,
-            unet_config=UnetConfig
+            train_config=TrainConfig(),
+            unet_config=UnetConfig()
         )
 
     elif TrainConfig.training_type == "ddpm":
@@ -199,7 +199,7 @@ if __name__ == "__main__":
             lr=TrainConfig.lr,
             experiment_name=TrainConfig.experiment_name,
             sampling=TrainConfig.sampling, 
-            ddpm_config=DDPMConfig,
-            train_config=TrainConfig,
-            unet_config=UnetConfig
+            ddpm_config=DDPMConfig(),
+            train_config=TrainConfig(),
+            unet_config=UnetConfig()
         )
