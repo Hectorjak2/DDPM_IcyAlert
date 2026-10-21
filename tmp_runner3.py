@@ -14,6 +14,7 @@ train_conf.number_of_samples = 10
 
 ddpm_conf = DDPMConfig()
 ddpm_conf.analysis_sampling = True
+ddpm_conf.schedule = "shifted_cosine"
 
 model = train_ddpm(
             dataset=train_conf.dataset,
