@@ -79,6 +79,7 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
 
     Path(outdir).mkdir(parents=True, exist_ok=True)
 
+    T = ddpm.timesteps
     total_varying_loss = []
     total_sampling_loss = []
     total_no_context_loss = []
@@ -92,11 +93,20 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
         target  = sample[:1]           # k+1 — ground truth, for comparison only
 
         #Retrieving a wrong context to test how reliant forecast is on the context
-        wrong_idx = date_rng.randrange(len(test_ds)-10)
+        wrong_idx = date_rng.randrange(len(test_ds))
+        while abs(wrong_idx - idx) < 30: 
+            wrong_idx = date_rng.randrange(len(test_ds))
+
         s, m = test_ds[wrong_idx]
         wrong_context = s[1:]
 
         target = to_data_range(target) #[0,1]: for the running sampling loss and for storage
+
+        #regular sampling
+        sample, loss_during_sampling = ddpm.sample(context=context, month=int(month), model=model, target=target) #sample already back to [0,1] range in function
+
+        #Sampling with wrong context
+        sample, no_context_loss= ddpm.sample(context=wrong_context, month=int(month), model=model, target=target)
 
         varying_t_loss = []
         #Testing different parts of t-range ability to produce SIC fields
@@ -105,16 +115,11 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
 
             sample = ddpm.sample(context=context, month=int(month), model=model) #sample already back to [0,1] range in function
 
-            se = (to_data_range(sample) - target.nan_to_num(nan=0.0).unsqueeze(1)) ** 2
+            se = (sample - target.nan_to_num(nan=0.0).unsqueeze(1)) ** 2
             loss = se[ddpm.water_mask.expand_as(se)].mean()
             varying_t_loss.append(loss.item())
 
-        #regular sampling
-        sample, loss_during_sampling = ddpm.sample(context=context, month=int(month), model=model, target=target) #sample already back to [0,1] range in function
-
-        #Sampling with wrong context
-        sample, no_context_loss= ddpm.sample(context=wrong_context, month=int(month), model=model, target=target)
-
+        ddpm.timesteps = T 
 
         total_varying_loss.append(varying_t_loss)
         total_sampling_loss.append(loss_during_sampling)
