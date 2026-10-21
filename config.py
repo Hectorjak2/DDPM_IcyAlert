@@ -33,7 +33,7 @@ class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 100
+    timesteps: int = 1000
     schedule: str = "laplace"
 
     # Only used when schedule == "linear".
@@ -41,7 +41,7 @@ class DDPMConfig:
     beta_end: float = 0.02
 
     # Only used when schedule == "laplace". Hang et al.'s defaults.
-    laplace_mu: float = 0.0
+    laplace_mu: float = 2
     laplace_b: float = 0.5
 
     #Only used when schedule is shifted cosine: 
@@ -62,15 +62,15 @@ class TrainConfig:
     training_type: str = "ddpm" #"unet", "ddpm"
 
     #Forecasting settings: 
-    forecasting_slice: slice = SMOKE_TEST_SLICE #Set to None if forecasting should be disabled
+    forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_TEST
-    experiment_name: str = f"{training_type}-testinglaplace"
-    batch_size: int = 2
-    epochs: int = 1
+    dataset = DatasetChoice.CARRA_WEST
+    experiment_name: str = f"{training_type}-laplace_v1"
+    batch_size: int = 4
+    epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 1
+    number_of_samples: int = 10
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     sampling: bool = True
 
