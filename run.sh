@@ -24,4 +24,4 @@ export CARRA2_DATA_ROOT=/work3/s234822/data/data/CARRA2_DAILY
 export TEMP_RESULT_STORAGE=/work3/s234822/data/data/samples
 
 /zhome/eb/6/205174/DDPM_IcyAlert/.venv/bin/python -u \
-    /zhome/eb/6/205174/DDPM_IcyAlert/main.py
+    /zhome/eb/6/205174/DDPM_IcyAlert/tmp_runner1.py

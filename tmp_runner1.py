@@ -8,19 +8,22 @@ unet_conf = UnetConfig()
 unet_conf.attention = False
 
 train_conf = TrainConfig()
-train_conf.experiment_name = "sampling_unet"
+ddpm_conf = DDPMConfig()
+ddpm_conf.laplace_mu = 0
+
+train_conf.experiment_name = "ddpm-laplace_v2"
 train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
 
-model = train_unet(
-            dataset=train_conf.dataset,
-            forecast_period = train_conf.forecasting_slice,
-            batch_size=train_conf.batch_size,
-            epochs=train_conf.epochs,
-            lr=train_conf.lr,
-            experiment_name=train_conf.experiment_name,
-            sampling=train_conf.sampling,
+model, ddpm, train_ds = train_ddpm(
+            dataset=TrainConfig.dataset,
+            forecast_period = TrainConfig.forecasting_slice,
+            timesteps=DDPMConfig.timesteps,
+            batch_size=TrainConfig.batch_size,
+            epochs=TrainConfig.epochs,
+            lr=TrainConfig.lr,
+            experiment_name=TrainConfig.experiment_name,
+            sampling=TrainConfig.sampling, 
+            ddpm_config=ddpm_conf,
             train_config=train_conf,
-            unet_config=unet_conf,
-            load_weights="unet-current/final_weights.pth",
-            train=False
+            unet_config=unet_conf
         )
