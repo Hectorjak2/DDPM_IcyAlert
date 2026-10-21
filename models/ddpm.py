@@ -11,6 +11,9 @@ from utils.dataloader import to_data_range
 
 
 class DDPM:
+    # Noise schedules accepted by build_schedule(); plotting iterates over this.
+    SCHEDULES = ("linear", "cosine", "laplace")
+
     def __init__(
         self,
         timesteps: int = 1000,
@@ -18,27 +21,20 @@ class DDPM:
         image_size: int = 128,
         land_mask: Optional[torch.Tensor] = None,
         schedule: str = None,
-        shift_ref_resolution: Optional[int] = None,
     ):
         """
         DDPM wrapper.
 
         Args:
-            schedule: one of ["linear", "shifted_cosine"]
+            schedule: one of DDPM.SCHEDULES
         """
         self.timesteps = timesteps
         self.device = device
-        # Assigned before the schedule is built: the shift depends on it.
         self.image_size = image_size
         self.schedule = schedule if schedule is not None else DDPMConfig.schedule
-        self.shift_ref_resolution = (
-            shift_ref_resolution if shift_ref_resolution is not None
-            else DDPMConfig.shift_ref_resolution
-        )
         self.output_name = "" # Initialize output_name to an empty string
 
-        # The land mask is resolved first: it is the authority on the field size, and the
-        # noise schedule is shifted for that size.
+        # The land mask is resolved first
         if land_mask is not None:
             land_mask = land_mask.to(self.device).float()
             while land_mask.dim() < 4:
@@ -50,9 +46,6 @@ class DDPM:
         else:
             self.mask_channel = None
             self.water_mask = None
-
-        # Diffusion schedule. Precomputed once here rather than rebuilt on every
-        # q_sample/p_sample call (which cost a linspace + cumprod per reverse step).
 
         betas, alphas, alphas_bar = self.build_schedule(timesteps)
 
@@ -79,50 +72,41 @@ class DDPM:
             setattr(self, name, tensor.float().to(self.device))
 
     def build_schedule(self, timesteps: int):
-        """Build the diffusion schedule, returning ``(betas, alphas, alphas_bar)``.
-
-        The schedule is defined on ``alpha_bar`` rather than on ``betas``, because the
-        quantity that actually matters -- how much of x0 survives to step t, at each
-        spatial scale -- is a statement about alpha_bar. betas are then recovered from it.
-
-        Returned in float64 on the CPU; ``__init__`` derives the posterior coefficients
-        from these and casts everything to float32 at the end.
         """
+        Build the diffusion schedule, returning ``(betas, alphas, alphas_bar)``.
+        """
+        if self.schedule not in self.SCHEDULES:
+            raise ValueError(
+                f"unknown schedule {self.schedule!r}; expected one of {self.SCHEDULES}"
+            )
+
         if self.schedule == "linear":
             betas = torch.linspace(
-                DDPMConfig.beta_start, DDPMConfig.beta_end, timesteps, dtype=torch.float64
-            )
-        elif self.schedule == "shifted_cosine":
-            alphas_bar = self._cosine_alphas_bar(timesteps)
+                DDPMConfig.beta_start, DDPMConfig.beta_end, timesteps, dtype=torch.float64)
+            alphas = 1.0 - betas
+            alphas_bar = torch.cumprod(alphas, dim=0)
 
-            # Shift the whole log-SNR curve down by 2*log(ref/d). Averaging x_t over a
-            # k x k block cuts the i.i.d. noise std by k while leaving a smooth x0
-            # intact, so the SNR at scale k is sqrt(abar/(1-abar)) * k -- it grows with
-            # image size. Shifting by the size ratio cancels exactly that growth, which
-            # is what keeps q(x_T) close to N(0, I) at every scale up to the full domain.
-            shift = 2.0 * math.log(self.shift_ref_resolution / self.image_size)
-            log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
-            alphas_bar = torch.sigmoid(log_snr)
+        else: 
+            if self.schedule == "cosine":
+                s = DDPMConfig.cosine_s
+                x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
+                f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
+                alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
 
-            # betas from the ratio of consecutive alpha_bar, with alpha_bar_{-1} = 1.
+            elif self.schedule == "laplace":
+                mu, b = DDPMConfig.laplace_mu, DDPMConfig.laplace_b
+                t = (torch.arange(timesteps, dtype=torch.float64) + 0.5) / timesteps
+                
+                log_snr = mu - b * torch.sign(0.5 - t) * torch.log(1.0 - 2.0 * (t - 0.5).abs())
+                alphas_bar = torch.sigmoid(log_snr).clamp(1e-12, 1.0 - 1e-12)
+
+            # Shared derivation for all non-linear schedules
             alphas_bar_prev = torch.cat([torch.ones(1, dtype=torch.float64), alphas_bar[:-1]])
             betas = (1.0 - alphas_bar / alphas_bar_prev).clamp(0.0, 0.999)
-        else:
-            raise ValueError(
-                f"unknown schedule {self.schedule!r}; expected 'shifted_cosine' or 'linear'"
-            )
-
-        alphas = 1.0 - betas
-        alphas_bar = torch.cumprod(alphas, dim=0)
-
+            alphas = 1.0 - betas
+            
         return betas, alphas, alphas_bar
 
-    @staticmethod
-    def _cosine_alphas_bar(timesteps: int, s: float = 0.008) -> torch.Tensor:
-        """Cosine alpha_bar schedule (Nichol & Dhariwal 2021, eq. 17), in float64."""
-        x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
-        f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
-        return (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
 
     def model_input(self, xt: torch.Tensor) -> torch.Tensor:
         """Assemble the network input, appending the static land mask channel if present."""

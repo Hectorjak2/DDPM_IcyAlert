@@ -17,7 +17,8 @@ from models.models import DatasetChoice
 
 @dataclass
 class UnetConfig:
-    """UNet architecture configuration for CARRA2 training.
+    """
+    UNet architecture configuration for CARRA2 training.
     """
     out_channels: int = 1
     dropout: float = 0.1
@@ -29,34 +30,22 @@ class UnetConfig:
 
 @dataclass
 class DDPMConfig:
-    """DDPM diffusion process configuration.
-
-    ``schedule`` selects how alpha_bar decays:
-
-    - ``"linear"``: the original Ho et al. betas, kept so the pre-2026-09 runs stay
-      reproducible for the write-up.
-    - ``"shifted_cosine"`` (default): cosine schedule with its log-SNR shifted down by
-      ``2 * log(shift_ref_resolution / image_size)``.
-
-    The shift is the important part. Noise is i.i.d. per pixel, so averaging x_t over a
-    k x k block cuts the noise std by k while a spatially smooth x0 keeps its magnitude:
-    the SNR at scale k is ``sqrt(alpha_bar / (1 - alpha_bar)) * k``. Under the linear
-    schedule at 1216x1216 that is 7.73 at k = the full domain, meaning x_T still reports
-    the domain-mean ice concentration and q(x_T) is nowhere near N(0, I). The network then
-    reads the global layout off its input instead of learning to generate one, and samples
-    from a true N(0, I) collapse to the prior mean. The leak grows with image size (0.41 at
-    64x64, 7.73 at 1216x1216), which is why an absolute beta range does not transfer.
-
-    ``shift_ref_resolution=64`` is the "simple diffusion" (Hoogeboom et al.) prescription;
-    see docs/architecture.md.
     """
-    timesteps: int = 1000
-    schedule: str = "shifted_cosine"
-    shift_ref_resolution: int = 64
+    DDPM diffusion process configuration.
+    """
+    timesteps: int = 100
+    schedule: str = "laplace"
+
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
     beta_end: float = 0.02
-    device: str = "mps"  # Will be overridden by get_device() at runtime
+
+    # Only used when schedule == "laplace". Hang et al.'s defaults.
+    laplace_mu: float = 0.0
+    laplace_b: float = 0.5
+
+    #Only used when schedule is shifted cosine: 
+    cosine_s: float = 0.008
 
 TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")
@@ -66,25 +55,22 @@ COOL_SEASON = [slice(f"{year}-10-01", f"{year + 1}-03-31") for year in range(202
 
 @dataclass
 class TrainConfig:
-    """Training parameters and hyperparameters.
-
-    Note: The current __main__ block in main.py uses batch_size=2, epochs=2,
-    which looks like a smoke-test config. See docs/architecture.md for details.
-    For a real HPC run, you probably want larger values (e.g., batch_size=16, epochs=100).
+    """
+    Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "unet" #"unet", "ddpm"
+    training_type: str = "ddpm" #"unet", "ddpm"
 
     #Forecasting settings: 
-    forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
+    forecasting_slice: slice = SMOKE_TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-current_attention"
-    batch_size: int = 4
-    epochs: int = 10
+    dataset = DatasetChoice.CARRA_TEST
+    experiment_name: str = f"{training_type}-testinglaplace"
+    batch_size: int = 2
+    epochs: int = 1
     lr: float = 3e-4
-    number_of_samples: int = 100
+    number_of_samples: int = 1
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     sampling: bool = True
 

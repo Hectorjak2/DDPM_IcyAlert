@@ -113,6 +113,8 @@ Two things to know:
 
 `utils/check_schedule.py` verifies both the invariants and the leakage empirically. Note that the domain-scale row has a standard error of roughly `1/sqrt(n_fields)` — with too few fields it swings by ±0.4 and is not interpretable, and the fields must span the seasonal cycle or there is no between-field variance for the correlation to detect.
 
+**Laplace schedule (`schedule="laplace"`).** The valid schedule names live in `DDPM.SCHEDULES`, which the plotting scripts iterate over. Laplace (Hang et al. 2024) sets `λ(t) = μ − b·sgn(0.5−t)·log(1−2|t−0.5|)`, the inverse CDF of Laplace(μ, b), evaluated at step midpoints `t = (i+0.5)/T`, with `ᾱ = σ(λ)` and β recovered the same way as for shifted cosine. **It has no resolution shift**, and with the paper's defaults (μ=0, b=0.5) the log-SNR only spans about ±3.5 over 1000 steps: `ᾱ_0 = 0.969`, `ᾱ_T = 0.031`. At 1216² that leaves a domain-scale SNR of about 217 at t=T, far above the linear schedule's 7.73. Before training on WEST with it, move μ down (e.g. to the shift `2·log(64/1216) ≈ −5.9`) and/or raise b.
+
 ### Per-Timestep Loss Reporting
 
 **Location:** [models/ddpm.py](../models/ddpm.py) `train()`.

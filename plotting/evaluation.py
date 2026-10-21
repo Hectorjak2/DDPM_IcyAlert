@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from plotting.plot_config import savefig, TEXTWIDTH_IN, COLORS, MUTED, REF_LINESTYLE
+from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MUTED, REF_LINESTYLE
 from utils.dataloader import to_data_range
 
 # Sea-ice colormap: open water dark blue, full ice white, land grey.
@@ -63,7 +63,7 @@ def load_samples(path: str | Path):
     """
     path = Path(path)
     if path.suffix != ".pkl":
-        path = (path if path.exists() else Path("results") / path) / "sampling_ddpm_att_samples.pkl"
+        path = (path if path.exists() else Path("results") / path) / "samples.pkl"
 
     with open(path, "rb") as f:
         payload = pickle.load(f)

@@ -2,7 +2,7 @@ from utils.dataloader import CARRA2
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from plotting.plot_config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
+from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
 
 from models.models import DatasetChoice
 from models.ddpm import DDPM
@@ -35,7 +35,6 @@ for ax, schedule in zip(axes, ["linear", "shifted_cosine"]):
         image_size=train_ds[0][0].shape[-1],
         land_mask=train_ds.finite_mask,
         schedule=schedule,
-        shift_ref_resolution=DDPMConfig.shift_ref_resolution,
     )
 
     for k, color, marker in zip(scales, COLORS, MARKERS):

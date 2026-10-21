@@ -9,7 +9,7 @@ unet_conf.attention = False
 
 train_conf = TrainConfig()
 train_conf.experiment_name = "sampling_unet"
-train_conf.output_dir = SAMPLINGROOT
+train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
 
 model = train_unet(
             dataset=train_conf.dataset,

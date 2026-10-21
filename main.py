@@ -59,7 +59,6 @@ def train_ddpm(dataset: DatasetChoice,
                 image_size=train_ds[0][0].shape[-1],
                 land_mask=train_ds.finite_mask,
                 schedule=ddpm_config.schedule,
-                shift_ref_resolution=ddpm_config.shift_ref_resolution,
                 forecast_period=forecast_period
             ) 
     else: 
@@ -69,7 +68,6 @@ def train_ddpm(dataset: DatasetChoice,
             image_size=train_ds[0][0].shape[-1],
             land_mask=train_ds.finite_mask,
             schedule=ddpm_config.schedule,
-            shift_ref_resolution=ddpm_config.shift_ref_resolution,
         ) 
 
     print(schedule_summary(ddpm))

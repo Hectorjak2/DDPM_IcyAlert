@@ -14,7 +14,7 @@ def schedule_summary(ddpm: DDPM) -> str:
     """One-line description of the realised noise schedule (printed and snapshotted)."""
     return (
         f"Noise schedule: {ddpm.schedule} "
-        f"(image_size={ddpm.image_size}, ref={ddpm.shift_ref_resolution}) -- "
+        f"(image_size={ddpm.image_size} -- "
         f"sqrt(alpha_bar) at t=0: {ddpm.alphas_bar[0].sqrt():.4f}, "
         f"t=T: {ddpm.alphas_bar[-1].sqrt():.3e}"
     )
@@ -68,7 +68,7 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
         sampling_losses.append(loss_during_sampling)
 
         #dump the samples after each iteration
-        pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"{outdir}/{train_cfg.experiment_name}_samples.pkl", "wb"))
+        pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"{outdir}/samples.pkl", "wb"))
 
 @torch.no_grad()
 def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainConfig):
@@ -112,8 +112,7 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
         contexts.append(de_standardize(context).cpu())
 
         if i%10 == 0 or i == (n_of_samples-1): 
-            pickle.dump((samples, contexts, targets, times), open(f"{outdir}/{train_cfg.experiment_name}_samples.pkl", "wb"))
-
+            pickle.dump((samples, contexts, targets, times), open(f"{outdir}/samples.pkl", "wb"))
 
 
 def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM, unet:bool = False) -> Path:

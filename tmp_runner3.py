@@ -9,7 +9,7 @@ unet_conf.attention = True
 
 train_conf = TrainConfig()
 train_conf.experiment_name = "sampling_ddpm_att"
-train_conf.output_dir = SAMPLINGROOT
+train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
 
 model = train_ddpm(
             dataset=train_conf.dataset,

@@ -31,7 +31,7 @@ if not os.path.isdir(os.path.join(PNN, "pycore")):
 sys.path.append(PNN)
 sys.path.append(os.path.abspath(os.path.join(HERE, "..")))
 from pycore.tikzeng import *  # noqa: E402
-from plotting.plot_config import TEXTWIDTH_IN, FONTSIZE, COLORS  # noqa: E402
+from plotting.config import TEXTWIDTH_IN, FONTSIZE, COLORS  # noqa: E402
 from config import UnetConfig  # noqa: E402
 
 _cfg = UnetConfig()

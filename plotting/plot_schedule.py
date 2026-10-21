@@ -1,68 +1,58 @@
 import matplotlib.pyplot as plt
 import torch
 
-from utils import CARRA2
 from models.ddpm import DDPM
-from config import DDPMConfig
+from plotting.config import savefig, TEXTWIDTH_IN
+
+# Readable, LaTeX-safe labels for DDPM.SCHEDULES
+SCHEDULE_LABELS = {"linear": "Linear", "cosine": "Cosine", "laplace": "Laplace"}
 
 
-def plot_schedule(betas, alphas, alphas_bar):
-    """Plot betas, alphas, and alphas_bar against the diffusion timestep."""
-    betas = betas.cpu()
-    alphas = alphas.cpu()
-    alphas_bar = alphas_bar.cpu()
+def plot_schedule(betas, alphas, alphas_bar, name: str = "schedule", output_dir: str = "figures"):
+    """Plot betas, alphas, and alphas_bar of one schedule against the diffusion timestep."""
     t = torch.arange(len(betas))
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    fig, axes = plt.subplots(1, 3)
+    for ax, values, title in zip(
+        axes,
+        (betas, alphas, alphas_bar),
+        (r"$\beta_t$", r"$\alpha_t$", r"$\bar{\alpha}_t$"),
+    ):
+        ax.plot(t, values.cpu())
+        ax.set_title(title)
+        ax.set_xlabel("timestep $t$")
 
-    axes[0].plot(t, betas)
-    axes[0].set_title(r"$\beta_t$")
-    axes[0].set_xlabel("timestep")
-
-    axes[1].plot(t, alphas)
-    axes[1].set_title(r"$\alpha_t$")
-    axes[1].set_xlabel("timestep")
-
-    axes[2].plot(t, alphas_bar)
-    axes[2].set_title(r"$\bar{\alpha}_t$")
-    axes[2].set_xlabel("timestep")
-
-    plt.tight_layout()
-    plt.show()
+    savefig(fig, output_dir, name, width=TEXTWIDTH_IN, height=2.4)
 
 
-def plot_schedule_comparison(schedules: dict):
-    """Overlay multiple named schedules' alphas_bar on one plot."""
-    fig, ax = plt.subplots(figsize=(6, 4))
+def plot_schedule_comparison(schedules: dict, name: str = "schedule_comparison", output_dir: str = "figures"):
+    """Overlay several named schedules: alphas_bar and log-SNR = log(alphas_bar / (1 - alphas_bar))."""
+    fig, axes = plt.subplots(1, 2, sharex=True)
 
-    for name, (_, _, alphas_bar) in schedules.items():
+    for label, (_, _, alphas_bar) in schedules.items():
         alphas_bar = alphas_bar.cpu()
         t = torch.arange(len(alphas_bar))
-        ax.plot(t, alphas_bar, label=name)
+        axes[0].plot(t, alphas_bar, label=label)
+        axes[1].plot(t, torch.log(alphas_bar / (1.0 - alphas_bar)), label=label)
 
-    ax.set_title(r"$\bar{\alpha}_t$")
-    ax.set_xlabel("timestep")
-    ax.legend()
+    axes[0].set_ylabel(r"$\bar{\alpha}_t$")
+    axes[1].set_ylabel(r"$\log \mathrm{SNR}(t)$")
+    # alphas_bar is clamped to [1e-12, 1 - 1e-12], so the endpoints spike to about +-27; clip to keep the shape readable
+    axes[1].set_ylim(-12, 12)
+    for ax in axes:
+        ax.set_xlabel("timestep $t$")
+    axes[0].legend()
 
-    plt.tight_layout()
-    plt.show()
+    savefig(fig, output_dir, name, width=TEXTWIDTH_IN, height=2.8)
 
 
 if __name__ == "__main__":
-    device = "mps"
     timesteps = 1000
-    train_ds = CARRA2("siconc", device, WEST=True, batch_dim=False)
 
+    # The schedule depends only on DDPMConfig and the number of timesteps, so no data is needed.
     schedules = {}
-    for name in ["linear", "shifted_cosine"]:
-        ddpm = DDPM(
-            timesteps=timesteps,
-            device=device,
-            image_size=train_ds[0][0].shape[-1],
-            land_mask=train_ds.finite_mask,
-            schedule=name,
-            shift_ref_resolution=DDPMConfig.shift_ref_resolution,
-        )
-        schedules[name] = ddpm.build_schedule(timesteps)
+    for schedule in DDPM.SCHEDULES:
+        ddpm = DDPM(timesteps=timesteps, device="cpu", schedule=schedule)
+        schedules[SCHEDULE_LABELS[schedule]] = ddpm.build_schedule(timesteps)
 
     plot_schedule_comparison(schedules)
