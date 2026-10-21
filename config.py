@@ -34,18 +34,20 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "laplace"
+    schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
     beta_end: float = 0.02
 
     # Only used when schedule == "laplace". Hang et al.'s defaults.
-    laplace_mu: float = 2
+    laplace_mu: float = 0
     laplace_b: float = 0.5
 
     #Only used when schedule is shifted cosine: 
     cosine_s: float = 0.008
+
+    analysis_sampling: bool = False
 
 TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")

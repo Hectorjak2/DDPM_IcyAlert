@@ -12,7 +12,7 @@ from utils.dataloader import to_data_range
 
 class DDPM:
     # Noise schedules accepted by build_schedule(); plotting iterates over this.
-    SCHEDULES = ("linear", "cosine", "laplace")
+    SCHEDULES = ("linear", "shifted_cosine", "cosine", "laplace")
 
     def __init__(
         self,
@@ -92,6 +92,16 @@ class DDPM:
                 x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
                 f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
                 alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
+
+            elif self.schedule == "shifted_cosine":
+                s = DDPMConfig.cosine_s
+                x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
+                f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
+                alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
+
+                shift = 2.0 * math.log(64 / self.image_size)
+                log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
+                alphas_bar = torch.sigmoid(log_snr)
 
             elif self.schedule == "laplace":
                 mu, b = DDPMConfig.laplace_mu, DDPMConfig.laplace_b

@@ -1,7 +1,7 @@
 import torch
 from utils import CARRA2, FashionMNIST, CARRA2Forecast, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
-from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary, download_conditional_samples, download_unet_samples
+from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary, download_conditional_samples, download_unet_samples, analysis_sampling
 
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
@@ -94,11 +94,16 @@ def train_ddpm(dataset: DatasetChoice,
         
     if sampling: 
         print("Sampling the model...")
-        if train_config.forecasting_slice: 
+        if ddpm_config.analysis_sampling: 
+            print("Analysis sampling")
             test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False)
-            download_conditional_samples(ddpm, model, test_ds, train_config, train_config.number_of_samples)
+            analysis_sampling(ddpm, model, test_ds, train_config, train_config.number_of_samples)
         else: 
-            download_samples(ddpm, model, train_config, train_config.number_of_samples) 
+            if train_config.forecasting_slice: 
+                test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False)
+                download_conditional_samples(ddpm, model, test_ds, train_config, train_config.number_of_samples)
+            else: 
+                download_samples(ddpm, model, train_config, train_config.number_of_samples) 
 
     print(f"Writing config snapshot")
     config_path = dump_config_snapshot(train_config, ddpm)

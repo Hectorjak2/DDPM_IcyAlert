@@ -70,6 +70,60 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
         #dump the samples after each iteration
         pickle.dump((samples, contexts, targets, times, sampling_losses), open(f"{outdir}/samples.pkl", "wb"))
 
+def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainConfig, n_of_samples: int = 10):
+    print("Sampling from the trained model ...")
+    # Disable dropout for inference. Left in train mode the residual blocks inject
+    # noise at every one of the T reverse steps, which wrecks the sample.
+    model.eval()
+    outdir = train_cfg.output_dir
+
+    Path(outdir).mkdir(parents=True, exist_ok=True)
+
+    total_varying_loss = []
+    total_sampling_loss = []
+    total_no_context_loss = []
+
+    # Own RNG so the drawn dates depend only on the seed, not on earlier use of the global one.
+    date_rng = random.Random(train_cfg.sample_seed)
+    for i in tqdm(range(n_of_samples)):
+        idx = date_rng.randrange(len(test_ds))
+        sample, month = test_ds[idx]   # [3, H, W] = (k+1, k, k-1); month of k+1 (0-11)
+        context = sample[1:]           # (k, k-1) — what you condition on
+        target  = sample[:1]           # k+1 — ground truth, for comparison only
+
+        #Retrieving a wrong context to test how reliant forecast is on the context
+        wrong_idx = date_rng.randrange(len(test_ds)-10)
+        s, m = test_ds[wrong_idx]
+        wrong_context = s[1:]
+
+        target = to_data_range(target) #[0,1]: for the running sampling loss and for storage
+
+        varying_t_loss = []
+        #Testing different parts of t-range ability to produce SIC fields
+        for t in torch.arange(100,ddpm.timesteps+100, 100): 
+            ddpm.timesteps = t
+
+            sample = ddpm.sample(context=context, month=int(month), model=model) #sample already back to [0,1] range in function
+
+            se = (to_data_range(sample) - target.nan_to_num(nan=0.0).unsqueeze(1)) ** 2
+            loss = se[ddpm.water_mask.expand_as(se)].mean()
+            varying_t_loss.append(loss.item())
+
+        #regular sampling
+        sample, loss_during_sampling = ddpm.sample(context=context, month=int(month), model=model, target=target) #sample already back to [0,1] range in function
+
+        #Sampling with wrong context
+        sample, no_context_loss= ddpm.sample(context=wrong_context, month=int(month), model=model, target=target)
+
+
+        total_varying_loss.append(varying_t_loss)
+        total_sampling_loss.append(loss_during_sampling)
+        total_no_context_loss.append(no_context_loss)
+
+        #dump the samples after each iteration
+        pickle.dump((total_varying_loss, total_sampling_loss, total_no_context_loss), open(f"{outdir}/loss_stats.pkl", "wb"))
+        print(f"wrote to: {outdir}/loss_stats.pkl")
+
 @torch.no_grad()
 def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainConfig):
     """Deterministic UNet baseline. Saves (samples, contexts, targets, times) in [0, 1] with

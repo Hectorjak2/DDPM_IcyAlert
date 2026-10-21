@@ -5,7 +5,7 @@ from models.ddpm import DDPM
 from plotting.config import savefig, TEXTWIDTH_IN
 
 # Readable, LaTeX-safe labels for DDPM.SCHEDULES
-SCHEDULE_LABELS = {"linear": "Linear", "cosine": "Cosine", "laplace": "Laplace"}
+SCHEDULE_LABELS = {"linear": "Linear", "cosine": "Cosine", "laplace": "Laplace", "shifted_cosine": "Shifted cosine"}
 
 
 def plot_schedule(betas, alphas, alphas_bar, name: str = "schedule", output_dir: str = "figures"):

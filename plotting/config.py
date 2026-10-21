@@ -8,7 +8,7 @@ TEXTWIDTH_IN = 448.13 / 72.27
 FONTSIZE = 10
 
 # Palette: teal, golden yellow, burnt orange, slate gray (also the default colour cycle)
-COLORS = ["#3FA38F", "#E6B93D", "#D9692B", "#56A7F4"]
+COLORS = ["#3FA38F", "#E6B93D", "#D9692B", "#6B7280"]
 # Per-series markers so curves stay distinguishable in grayscale / for colour-blind readers
 MARKERS = ["o", "s", "^", "D"]
 # Soft neutrals

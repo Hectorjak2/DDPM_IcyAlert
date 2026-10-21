@@ -2,14 +2,17 @@ from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
 from main import train_ddpm, train_unet
 import os 
 
-SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results/samples")
+SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results")
 
 unet_conf = UnetConfig()
 unet_conf.attention = True
 
 train_conf = TrainConfig()
-train_conf.experiment_name = "sampling_ddpm_att"
+train_conf.experiment_name = "testing_ddpmatt_samples"
 train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
+
+ddpm_conf = DDPMConfig()
+ddpm_conf.analysis_sampling = True
 
 model = train_ddpm(
             dataset=train_conf.dataset,
@@ -22,7 +25,7 @@ model = train_ddpm(
             sampling=train_conf.sampling,
             train_config=train_conf,
             unet_config=unet_conf,
-            ddpm_config=DDPMConfig,
+            ddpm_config=ddpm_conf,
             load_weights="ddpm-current_attention/final_weights.pth",
             train=False
         )
