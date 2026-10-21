@@ -72,7 +72,7 @@ class TrainConfig:
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 10
+    number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     sampling: bool = True
 

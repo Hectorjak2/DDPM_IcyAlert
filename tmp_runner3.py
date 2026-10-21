@@ -10,6 +10,7 @@ unet_conf.attention = True
 train_conf = TrainConfig()
 train_conf.experiment_name = "testing_ddpmatt_samples"
 train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
+train_conf.number_of_samples = 10
 
 ddpm_conf = DDPMConfig()
 ddpm_conf.analysis_sampling = True
