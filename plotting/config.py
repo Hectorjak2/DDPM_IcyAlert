@@ -7,10 +7,11 @@ TEXTWIDTH_IN = 448.13 / 72.27
 # Thesis body font size (10pt)
 FONTSIZE = 10
 
-# Palette: teal, golden yellow, burnt orange, slate gray (also the default colour cycle)
-COLORS = ["#3FA38F", "#E6B93D", "#D9692B", "#6B7280"]
+# Palette: teal, golden yellow, burnt orange, slate gray, steel blue, plum, olive, brick red
+# (also the default colour cycle)
+COLORS = ["#3FA38F", "#E6B93D", "#D9692B", "#6B7280", "#3B6EA8", "#9C5B9E", "#7A9A3A", "#B5443A"]
 # Per-series markers so curves stay distinguishable in grayscale / for colour-blind readers
-MARKERS = ["o", "s", "^", "D"]
+MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 # Soft neutrals
 INK = "#3A3F47"     # text, ticks
 GRID = "#E3E6EA"    # grid lines

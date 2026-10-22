@@ -1,31 +1,18 @@
-import math
-
 import matplotlib.pyplot as plt
 import torch
 
-from config import DDPMConfig
-from models.ddpm import DDPM
 from plotting.config import savefig, TEXTWIDTH_IN
+from plotting.schedules import Schedule
 
-# Readable, LaTeX-safe labels for DDPM.SCHEDULES
-SCHEDULE_LABELS = {"linear": "Linear", "cosine": "Cosine", "laplace": "Laplace", "shifted_cosine": "Shifted cosine"}
-# Reference resolution of the shifted cosine, matching models/ddpm.py
+SCHEDULES = [
+    Schedule("cosine"),
+    Schedule("shifted_cosine", cosine_shift_res=64),
+    Schedule("shifted_cosine", cosine_shift_res=128),
+    Schedule("shifted_cosine", cosine_shift_res=256),
+]
 
-
-def schedule_label(schedule: str, image_size: int) -> str:
-    """Legend label of a schedule, with the DDPMConfig parameters it is built from."""
-    c = DDPMConfig
-    if schedule == "linear":
-        params = rf"$\beta_1 = {c.beta_start:g}$, $\beta_T = {c.beta_end:g}$"
-    elif schedule == "cosine":
-        params = rf"$s = {c.cosine_s:g}$"
-    elif schedule == "shifted_cosine":
-        delta = 2 * math.log(c.cosine_shift_res / image_size)
-        params = rf"$s = {c.cosine_s:g}$, $\delta = 2\log({c.cosine_shift_res}/{image_size}) \approx {delta:.2f}$"
-    elif schedule == "laplace":
-        params = rf"$\mu = {c.laplace_mu:g}$, $b = {c.laplace_b:g}$"
-    return f"{SCHEDULE_LABELS[schedule]} ({params})"
-
+TIMESTEPS = 1000
+IMAGE_SIZE = 1216  # CARRA2-WEST; sets the shifted cosine's delta, the others ignore it
 
 def plot_schedule(betas, alphas, alphas_bar, name: str = "schedule", output_dir: str = "figures"):
     """Plot betas, alphas, and alphas_bar of one schedule against the diffusion timestep."""
@@ -67,19 +54,4 @@ def plot_schedule_comparison(schedules: dict, name: str = "schedule_comparison",
 
 
 if __name__ == "__main__":
-    from models.models import DatasetChoice
-    from utils.dataloader import CARRA2
-
-    timesteps = 1000
-
-    # The shifted cosine depends on the resolution, so use the CARRA2-WEST size we train on
-    # (DDPM takes it from the land mask during training). Linear, cosine and Laplace ignore it.
-    image_size = max(CARRA2("siconc", "cpu", time_slice=slice("2000-03-15", "2000-03-15"),
-                            area=DatasetChoice.CARRA_WEST)[0].shape[-2:])
-
-    schedules = {}
-    for schedule in DDPM.SCHEDULES:
-        ddpm = DDPM(timesteps=timesteps, device="cpu", image_size=image_size, schedule=schedule)
-        schedules[schedule_label(schedule, image_size)] = ddpm.build_schedule(timesteps)
-
-    plot_schedule_comparison(schedules)
+    plot_schedule_comparison({s.label(IMAGE_SIZE): s.build(TIMESTEPS, IMAGE_SIZE) for s in SCHEDULES})

@@ -27,7 +27,7 @@
 - **[plotting/](../plotting/)** — All plotting code, split out of `utils/`. A regular package; run from the repo root so imports resolve as `plotting.*`.
   - [plotting/visualization.py](../plotting/visualization.py) — Sample plotting helpers (`visualize_sic_sample`, `visualize_fashion`, `plot_samples_grid`).
   - [plotting/conditional_visualization.py](../plotting/conditional_visualization.py) — Conditional forecast plots (context, ground truth, prediction).
-  - [plotting/plot_schedule.py](../plotting/plot_schedule.py) and [plotting/schedule_analysis.py](../plotting/schedule_analysis.py) — Noise-schedule plots and the per-scale correlation analysis.
+  - [plotting/schedules.py](../plotting/schedules.py) — `Schedule` spec (kind + parameters + label) for the noise-schedule figures [plotting/schedule_comparison.py](../plotting/schedule_comparison.py), [plotting/logsnr_distributions.py](../plotting/logsnr_distributions.py) and [plotting/forward_process.py](../plotting/forward_process.py). Each script lists its schedules in a settings block at the top instead of reading `DDPMConfig`, so one figure can show several variants (e.g. shifted cosines at different `cosine_shift_res`). Parameters left out fall back to `DDPMConfig`. Curves come from the same `models.ddpm.build_schedule` that training uses.
   - [plotting/plot_config.py](../plotting/plot_config.py) — Thesis figure style (10pt serif, `usetex`) plus `savefig` and `TEXTWIDTH_IN` (thesis `\textwidth` = 448.13pt). Thesis figures are saved as vector PDFs to `figures/`; use the `/thesis-plot` skill. Needs a local LaTeX install, so keep it out of HPC code paths.
   - `finite_TEST.pt` / `finite_WEST.pt` — Saved land/water masks used by the visualization scripts (WEST-shaped vs TEST-shaped, so they are not interchangeable).
 - **[data/](../data/)** (gitignored) — `CARRA2_MONTHLY/dataset.zarr` (zarr store, large) and `FashionMNIST/raw` (auto-downloaded by torchvision).
@@ -85,7 +85,7 @@ Also fixed here: noise was previously added whenever `t > 1`, so the final step 
 
 ### Noise Schedule: Shifted Cosine, Resolution-Aware
 
-**Location:** [models/ddpm.py](../models/ddpm.py) `build_schedule()`, [config.py](../config.py) `DDPMConfig`.
+**Location:** [models/ddpm.py](../models/ddpm.py) module-level `build_schedule()` (takes the parameters explicitly; defaults come from `DDPMConfig`, and `DDPM.build_schedule` calls it with those defaults), [config.py](../config.py) `DDPMConfig`.
 
 **The linear schedule does not destroy large-scale structure at 1216×1216.** DDPM sampling starts from `x_T ~ N(0,I)`, which is valid only if `q(x_T)` is genuinely close to `N(0,I)`. Noise is i.i.d. per pixel, so averaging `x_t` over a `k×k` block cuts the noise std by `k` while a spatially smooth `x_0` keeps its magnitude — the amplitude SNR at scale `k` is `sqrt(ᾱ/(1-ᾱ))·k`. Under `β = 1e-4 → 0.02` at t=999:
 

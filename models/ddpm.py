@@ -10,6 +10,60 @@ from config import DDPMConfig
 from utils.dataloader import to_data_range
 
 
+def build_schedule(
+    schedule: str,
+    timesteps: int,
+    image_size: int,
+    beta_start: float = DDPMConfig.beta_start,
+    beta_end: float = DDPMConfig.beta_end,
+    cosine_s: float = DDPMConfig.cosine_s,
+    cosine_shift_res: int = DDPMConfig.cosine_shift_res,
+    laplace_mu: float = DDPMConfig.laplace_mu,
+    laplace_b: float = DDPMConfig.laplace_b,
+):
+    """
+    Build a diffusion schedule, returning ``(betas, alphas, alphas_bar)``.
+
+    Parameters default to DDPMConfig, so training uses the config; plotting overrides them
+    to compare several variants of one schedule. Only the parameters of ``schedule`` are read.
+    """
+    if schedule not in DDPM.SCHEDULES:
+        raise ValueError(
+            f"unknown schedule {schedule!r}; expected one of {DDPM.SCHEDULES}"
+        )
+
+    if schedule == "linear":
+        betas = torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float64)
+        alphas = 1.0 - betas
+        alphas_bar = torch.cumprod(alphas, dim=0)
+
+    else:
+        if schedule in ("cosine", "shifted_cosine"):
+            s = cosine_s
+            x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
+            f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
+            alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
+
+            if schedule == "shifted_cosine":
+                shift = 2.0 * math.log(cosine_shift_res / image_size)
+                log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
+                alphas_bar = torch.sigmoid(log_snr)
+
+        elif schedule == "laplace":
+            mu, b = laplace_mu, laplace_b
+            t = (torch.arange(timesteps, dtype=torch.float64) + 0.5) / timesteps
+
+            log_snr = mu - b * torch.sign(0.5 - t) * torch.log(1.0 - 2.0 * (t - 0.5).abs())
+            alphas_bar = torch.sigmoid(log_snr).clamp(1e-12, 1.0 - 1e-12)
+
+        # Shared derivation for all non-linear schedules
+        alphas_bar_prev = torch.cat([torch.ones(1, dtype=torch.float64), alphas_bar[:-1]])
+        betas = (1.0 - alphas_bar / alphas_bar_prev).clamp(0.0, 0.999)
+        alphas = 1.0 - betas
+
+    return betas, alphas, alphas_bar
+
+
 class DDPM:
     # Noise schedules accepted by build_schedule(); plotting iterates over this.
     SCHEDULES = ("linear", "shifted_cosine", "cosine", "laplace")
@@ -73,50 +127,9 @@ class DDPM:
 
     def build_schedule(self, timesteps: int):
         """
-        Build the diffusion schedule, returning ``(betas, alphas, alphas_bar)``.
+        Build the diffusion schedule from DDPMConfig, returning ``(betas, alphas, alphas_bar)``.
         """
-        if self.schedule not in self.SCHEDULES:
-            raise ValueError(
-                f"unknown schedule {self.schedule!r}; expected one of {self.SCHEDULES}"
-            )
-
-        if self.schedule == "linear":
-            betas = torch.linspace(
-                DDPMConfig.beta_start, DDPMConfig.beta_end, timesteps, dtype=torch.float64)
-            alphas = 1.0 - betas
-            alphas_bar = torch.cumprod(alphas, dim=0)
-
-        else: 
-            if self.schedule == "cosine":
-                s = DDPMConfig.cosine_s
-                x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
-                f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
-                alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
-
-            elif self.schedule == "shifted_cosine":
-                s = DDPMConfig.cosine_s
-                shif_res = DDPMConfig.cosine_shift_res
-                x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
-                f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
-                alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
-
-                shift = 2.0 * math.log(shif_res / self.image_size)
-                log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
-                alphas_bar = torch.sigmoid(log_snr)
-
-            elif self.schedule == "laplace":
-                mu, b = DDPMConfig.laplace_mu, DDPMConfig.laplace_b
-                t = (torch.arange(timesteps, dtype=torch.float64) + 0.5) / timesteps
-                
-                log_snr = mu - b * torch.sign(0.5 - t) * torch.log(1.0 - 2.0 * (t - 0.5).abs())
-                alphas_bar = torch.sigmoid(log_snr).clamp(1e-12, 1.0 - 1e-12)
-
-            # Shared derivation for all non-linear schedules
-            alphas_bar_prev = torch.cat([torch.ones(1, dtype=torch.float64), alphas_bar[:-1]])
-            betas = (1.0 - alphas_bar / alphas_bar_prev).clamp(0.0, 0.999)
-            alphas = 1.0 - betas
-            
-        return betas, alphas, alphas_bar
+        return build_schedule(self.schedule, timesteps, self.image_size)
 
 
     def model_input(self, xt: torch.Tensor) -> torch.Tensor:
