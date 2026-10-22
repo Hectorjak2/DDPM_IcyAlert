@@ -34,18 +34,19 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "laplace"
+    schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
     beta_end: float = 0.02
 
     # Only used when schedule == "laplace". Hang et al.'s defaults.
-    laplace_mu: float = 0
+    laplace_mu: float = -2
     laplace_b: float = 0.5
 
-    #Only used when schedule is shifted cosine: 
+    #Only used when schedule is cosine: 
     cosine_s: float = 0.008
+    cosine_shift_res: int = 128
 
     analysis_sampling: bool = False
 
@@ -68,7 +69,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-laplace_v1"
+    experiment_name: str = f"{training_type}-shifted_cos_128"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

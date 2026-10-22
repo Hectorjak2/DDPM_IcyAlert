@@ -64,9 +64,12 @@ def plot_context_sampling_loss(sampling, no_context, out_dir):
     fig, ax = plt.subplots()
     ax.plot(t, sampling.mean(axis=0), color=COLORS[0], label="True context")
     ax.plot(t, no_context.mean(axis=0), color=COLORS[2], label="Wrong context")
+    # Symlog (linear on [0, 1], log above) stretches the last ~100 steps, where the curves
+    # separate, while still showing t = 0, which a plain log axis cannot.
+    ax.set_xscale("symlog", linthresh=1)
     ax.set_xlim(n_steps - 1, 0)  # sampling runs left to right, ending at t = 0
     ax.set_ylim(bottom=0)
-    ax.set_xlabel("timestep $t$")
+    ax.set_xlabel("timestep $t$ (symlog)")
     ax.set_ylabel("MSE over water")
     ax.legend()
 

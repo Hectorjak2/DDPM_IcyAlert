@@ -18,7 +18,7 @@ class DDPM:
         self,
         timesteps: int = 1000,
         device: str = "mps",
-        image_size: int = 128,
+        image_size: int = 1216,
         land_mask: Optional[torch.Tensor] = None,
         schedule: str = None,
     ):
@@ -95,11 +95,12 @@ class DDPM:
 
             elif self.schedule == "shifted_cosine":
                 s = DDPMConfig.cosine_s
+                shif_res = DDPMConfig.cosine_shift_res
                 x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
                 f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
                 alphas_bar = (f[1:] / f[0]).clamp(1e-12, 1.0 - 1e-12)
 
-                shift = 2.0 * math.log(64 / self.image_size)
+                shift = 2.0 * math.log(shif_res / self.image_size)
                 log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
                 alphas_bar = torch.sigmoid(log_snr)
 

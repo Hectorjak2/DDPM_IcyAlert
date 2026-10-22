@@ -7,7 +7,7 @@ from models.ddpm import DDPM
 from models.models import DatasetChoice
 from plotting.config import savefig, TEXTWIDTH_IN
 from plotting.evaluation import _clean_image_axis, _show_field
-from plotting.plot_schedule import SCHEDULE_LABELS
+from plotting.schedule_comparison import SCHEDULE_LABELS
 from utils.dataloader import CARRA2, to_data_range
 
 DATE = "2000-03-15"  # near the annual sea-ice maximum
