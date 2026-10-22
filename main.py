@@ -83,6 +83,10 @@ def train_ddpm(dataset: DatasetChoice,
         n_res_blocks=unet_config.n_res_blocks,
         attention=unet_config.attention,
     )
+
+    print(f"Writing config snapshot")
+    dump_config_snapshot(train_config, ddpm)
+    
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
         model.load_weights(path=f"results/{load_weights}", device=device)
@@ -105,8 +109,6 @@ def train_ddpm(dataset: DatasetChoice,
             else: 
                 download_samples(ddpm, model, train_config, train_config.number_of_samples) 
 
-    print(f"Writing config snapshot")
-    config_path = dump_config_snapshot(train_config, ddpm)
     print("SCRIPT DONE")
 
     return model, ddpm, train_ds
@@ -157,7 +159,9 @@ def train_unet(dataset: DatasetChoice,
                 device=device,
                 attention=unet_config.attention,
             )
-
+    print(f"Writing config snapshot")
+    dump_config_snapshot(train_config, model, unet=True)
+    
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
         model.load_weights(path=f"results/{load_weights}", device=device)
@@ -173,9 +177,7 @@ def train_unet(dataset: DatasetChoice,
         test_ds.mean, test_ds.std = train_ds.mean, train_ds.std  # the model was trained on these
         download_unet_samples(model, test_ds, train_config.number_of_samples, train_config)
 
-    print(f"Writing config snapshot")
-    config_path = dump_config_snapshot(train_config, model, unet=True)
-
+    print("SCRIPT DONE ")
     return model
 
 if __name__ == "__main__":
