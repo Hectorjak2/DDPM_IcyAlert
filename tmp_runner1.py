@@ -5,13 +5,12 @@ import os
 SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results/samples")
 
 unet_conf = UnetConfig()
-unet_conf.attention = False
-
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
-ddpm_conf.laplace_mu = 0
 
-train_conf.experiment_name = "ddpm-laplace_v2"
+ddpm_conf.cosine_shift_res = 256
+
+train_conf.experiment_name = "ddpm-shifted_cos_256"
 train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
 
 model, ddpm, train_ds = train_ddpm(
