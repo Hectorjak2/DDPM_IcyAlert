@@ -5,18 +5,16 @@ import os
 SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results")
 
 unet_conf = UnetConfig()
-unet_conf.attention = True
 
 train_conf = TrainConfig()
-train_conf.experiment_name = "testing_ddpmatt_samples"
+train_conf.experiment_name = "unet-residual"
 train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
-train_conf.number_of_samples = 10
 
 ddpm_conf = DDPMConfig()
 ddpm_conf.analysis_sampling = True
-ddpm_conf.schedule = "shifted_cosine"
+ddpm_conf.schedule = "cosine"
 
-model = train_ddpm(
+model = train_unet(
             dataset=train_conf.dataset,
             forecast_period = train_conf.forecasting_slice,
             timesteps=DDPMConfig.timesteps,
@@ -27,7 +25,5 @@ model = train_ddpm(
             sampling=train_conf.sampling,
             train_config=train_conf,
             unet_config=unet_conf,
-            ddpm_config=ddpm_conf,
-            load_weights="ddpm-current_attention/final_weights.pth",
-            train=False
+            train=True
         )
