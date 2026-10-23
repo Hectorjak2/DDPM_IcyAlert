@@ -3,9 +3,13 @@ import torch
 
 from plotting.config import savefig, TEXTWIDTH_IN
 from plotting.schedules import Schedule
+from config import DDPMConfig
+ddpm_conf = DDPMConfig()
 
 SCHEDULES = [
+    Schedule("linear", beta_start=ddpm_conf.beta_start, beta_end=ddpm_conf.beta_end),
     Schedule("cosine"),
+    Schedule("laplace", laplace_mu=0),
     Schedule("shifted_cosine", cosine_shift_res=64),
     Schedule("shifted_cosine", cosine_shift_res=128),
     Schedule("shifted_cosine", cosine_shift_res=256),

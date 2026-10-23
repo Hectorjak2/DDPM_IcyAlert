@@ -76,12 +76,24 @@ The mask is time-invariant in CARRA2 (verified across the full 288-month record)
 
 The reverse step is computed via the predicted `x_0` rather than directly from the noise:
 
-1. `x0_pred = (x_t - sqrt(1-ᾱ_t)·ε_θ) / sqrt(ᾱ_t)`, then **clamped to `[-1, 1]`**.
+1. `x0_pred = (x_t - sqrt(1-ᾱ_t)·ε_θ) / sqrt(ᾱ_t)`, then **clamped to `[-1, 1]`**. In `ConditionalDDPM`, `x0` is the residual, so it is clamped to `[-1 - k, 1 - k]` instead (see *Residual Prediction for Forecasting*).
 2. `mean = coef_x0(t)·x0_pred + coef_xt(t)·x_t`, the posterior mean of `q(x_{t-1} | x_t, x_0)` (Ho et al. eq. 7), with variance `β̃_t = β_t(1-ᾱ_{t-1})/(1-ᾱ_t)`.
 
 Without the clamp this is algebraically identical to the previous direct form `1/sqrt(α_t)·(x_t - (1-α_t)/sqrt(1-ᾱ_t)·ε_θ)` (verified numerically to ~1e-8). The clamp is the point: over T=1000 reverse steps, unconstrained errors compound and drive the sample far outside the data range.
 
 Also fixed here: noise was previously added whenever `t > 1`, so the final step was stochastic. It is now `t > 0`, making the last step deterministic as intended.
+
+### Residual Prediction for Forecasting
+
+**Location:** [models/ddpm.py](../models/ddpm.py) `ConditionalDDPM`, [models/hec_unet.py](../models/hec_unet.py) `train_network`, [utils/helper_functions.py](../utils/helper_functions.py) `download_unet_samples`.
+
+Both forecasters predict the month-to-month change `k+1 − k` rather than the field `k+1`, and reconstruct by adding day `k` back. Land is NaN→0 in both fields, so its residual is 0 ("no change").
+
+- **ConditionalDDPM** diffuses the residual (model units, range `[-2, 2]`). The `x0_pred` clamp is `[-1 − k, 1 − k]`, so that `k + x0_pred` stays in `[-1, 1]`. A `±1` clamp would cap the change at ±0.5 SIC; month-apart changes reach the full ±1 SIC (measured: max |residual| = 2.0 for 2000-03-15 → 2000-04-15). `sample(..., base=)` sets the field the residual is added to, and its clamp bounds. `analysis_sampling` passes the true `k` with a wrong context, so the wrong-context loss measures reliance on conditioning only, not a wrong baseline.
+- **UNet baseline** (standardized units) outputs the residual `(k+1 − k)/std`; the mean cancels. The loss is taken on the reconstruction `k + pred`, which equals the loss on the residual, so the persistence ratio printed in training stays directly comparable.
+- **`SimpleUnet.final_conv` is zero-initialised**, so at init the baseline is exactly persistence (ratio 1.0) and the DDPM predicts zero noise. This is shared by both models; the same choice as Dhariwal & Nichol's output layer.
+
+**Open: residual scale vs. noise schedule.** The schedule was tuned for full fields. The residual has a smaller std (0.34 vs. 0.92 in model units for the date pair above, near the ice maximum; melt/freeze-up months will differ), which shifts the effective log-SNR by `2·log(σ_r/σ_x) ≈ −2.0` on top of the schedule's own shift. Not yet resolved: either divide the residual by a training-set `σ_r`, or retune `cosine_shift_res`.
 
 ### Noise Schedule: Shifted Cosine, Resolution-Aware
 

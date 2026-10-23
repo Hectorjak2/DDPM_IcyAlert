@@ -235,6 +235,10 @@ class SimpleUnet(BaseUnet):
         #final norm + conv
         self.final_norm = nn.GroupNorm(_valid_groups(prev_channels, groups), prev_channels)
         self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=3, padding=1)
+        # Zero-initialised so the output starts at 0: the residual UNet baseline then starts
+        # exactly at persistence, and the DDPM at predicting zero noise (as in Dhariwal & Nichol).
+        nn.init.zeros_(self.final_conv.weight)
+        nn.init.zeros_(self.final_conv.bias)
 
         #### For UNET baseline 
         if land_mask is not None:
@@ -298,8 +302,11 @@ def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, opt
             optimizer.zero_grad()
             t = torch.Tensor([0]).to(device)
 
-            pred = model(x, t, month)
-            
+            # The network predicts the residual k+1 - k, as in ConditionalDDPM; reconstruct
+            # k+1 by adding day k back. The loss on the reconstruction equals the loss on the
+            # residual, so it stays directly comparable to persistence below.
+            pred = batch[:, 1:2] + model(x, t, month)
+
             assert pred.shape == target.shape
             se = (pred - target) ** 2
             loss = se[model.water_mask.expand_as(se)].mean()

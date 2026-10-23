@@ -34,7 +34,7 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "shifted_cosine"
+    schedule: str = "cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -68,8 +68,8 @@ class TrainConfig:
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-shifted_cos_128"
+    dataset = DatasetChoice.CARRA_TEST
+    experiment_name: str = f"{training_type}-residual"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

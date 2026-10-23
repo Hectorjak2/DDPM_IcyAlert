@@ -69,8 +69,7 @@ class Schedule:
         elif self.kind == "cosine":
             params = rf"$s = {p['cosine_s']:g}$"
         elif self.kind == "shifted_cosine":
-            params = (rf"$s = {p['cosine_s']:g}$, $\delta = 2\log({p['cosine_shift_res']}/{image_size})"
-                      rf" \approx {self.shift(image_size):.2f}$")
+            params = rf"$s = {p['cosine_s']:g}$, $\delta = {self.shift(image_size):.2f}$"
         elif self.kind == "laplace":
             params = rf"$\mu = {p['laplace_mu']:g}$, $b = {p['laplace_b']:g}$"
         return f"{self.name} ({params})"

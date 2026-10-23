@@ -325,10 +325,11 @@ class ConditionalDDPM(DDPM):
         # Replace NaNs so they don't propagate through the conv layers and
         # contaminate the predictions at valid pixels
         x0 = torch.nan_to_num(x0, nan=0.0) #k+1, k, k-1
+        residual = (x0[:,0] - x0[:,1])
 
         # Sample x_t using the forward diffusion process, keeping the noise target
-        noise = torch.randn_like(x0[:,0].unsqueeze(1))
-        xt = self.q_sample(x0[:,0].unsqueeze(1), t, noise) #Only taking k+1
+        noise = torch.randn_like(residual.unsqueeze(1))
+        xt = self.q_sample(residual.unsqueeze(1), t, noise) #Only taking k+1
 
         #reconstructing the input to be [xt, k, k-1]
         input_X = torch.cat([xt, x0[:,1:]], dim=1)
@@ -345,18 +346,19 @@ class ConditionalDDPM(DDPM):
         return loss
 
     @torch.no_grad()
-    def p_sample(self, model, x, t, month):
+    def p_sample(self, model, x, t, month, base: Optional[torch.Tensor] = None):
         """
         Reverse diffusion process: p(x_{t-1} | x_t)
 
-        Parameterised through the predicted x_0 so it can be clamped to the valid
-        [-1, 1] data range at every step; without that, small errors compound over
-        T reverse steps and the sample drifts far outside the data range.
+        Parameterised through the predicted residual x_0 so it can be clamped at every
+        step such that base + x_0 stays in the valid [-1, 1] data range; without that,
+        small errors compound over T reverse steps and the sample drifts far outside it.
 
         Args:
             model: The U-Net model.
             x: Current image tensor of shape [B, C, H, W].
             t: Current timestep tensor of shape [B].
+            base: Field the residual is added to, [B, 1, H, W]. Defaults to day k (x[:, 1:2]).
         """
         # No noise is added on the final step (t == 0), which is deterministic.
         z = torch.randn_like(x[:,0].unsqueeze(1)) if t[0] > 0 else torch.zeros_like(x[:,0].unsqueeze(1))
@@ -369,8 +371,9 @@ class ConditionalDDPM(DDPM):
 
         # Recover x_0 from the predicted noise and clamp it to the data range
         predicted_noise = model(self.model_input(x), t, month)
+        k = x[:, 1:2] if base is None else base
         x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
-        x0_pred = x0_pred.clamp(-1.0, 1.0)
+        x0_pred = torch.clamp(x0_pred, -1.0 - k, 1.0 - k)
 
         # Posterior mean of q(x_{t-1} | x_t, x_0), plus noise
         mean = coef_x0 * x0_pred + coef_xt * x[:,0].unsqueeze(1)
@@ -379,8 +382,15 @@ class ConditionalDDPM(DDPM):
         return xt
 
     @torch.no_grad()
-    def sample(self, context:torch.Tensor, month: int, model, target: Optional[torch.Tensor] = None):
-        """Generate one sample, returned in data range [0, 1] with land set to NaN."""
+    def sample(self, context:torch.Tensor, month: int, model, target: Optional[torch.Tensor] = None,
+               base: Optional[torch.Tensor] = None):
+        """
+        Generate one sample, returned in data range [0, 1] with land set to NaN.
+
+        base: [1, H, W] field the predicted residual is added to. Defaults to day k
+        (context[0]); pass the true k with a wrong context to test how much the
+        network relies on its conditioning, separately from the reconstruction.
+        """
         if target is not None: 
             loss_during_sampling = []
         
@@ -393,6 +403,7 @@ class ConditionalDDPM(DDPM):
         # conv layers, same as compute_loss does for x0 -- otherwise NaN spreads
         # through the receptive field and compounds over every reverse step.
         context = torch.nan_to_num(context, nan=0.0).unsqueeze(0)  # -> [1, C, H, W]
+        base = context[:, 0:1] if base is None else torch.nan_to_num(base, nan=0.0).unsqueeze(0)  # -> [1, 1, H, W]
         xt = torch.randn((1, 1, height, width), device=self.device)
         month_tensor = torch.tensor([month], device=self.device).long()
         for t in reversed(range(self.timesteps)):
@@ -400,18 +411,20 @@ class ConditionalDDPM(DDPM):
             # Re-assemble [xt, k, k-1] each step: the context channels stay fixed,
             # but xt must be the latest denoised estimate, not the initial noise.
             input_x = torch.cat([xt, context], dim=1)
-            xt = self.p_sample(model, input_x, t_tensor, month_tensor)
+            xt = self.p_sample(model, input_x, t_tensor, month_tensor, base)
 
+            tmp_rec = xt + base #temporary reconstruction for loss
             if target is not None: 
-                se = (to_data_range(xt.clamp(-1.0, 1.0)) - target.nan_to_num(nan=0.0).unsqueeze(1)) ** 2
+                se = (to_data_range(tmp_rec.clamp(-1.0, 1.0)) - target.nan_to_num(nan=0.0).unsqueeze(1)) ** 2
                 loss = se[self.water_mask.expand_as(se)].mean()
                 loss_during_sampling.append(loss.item())
 
 
         # Back from the model's [-1, 1] range to concentrations in [0, 1]
-        xt = to_data_range(xt.clamp(-1.0, 1.0))
+        xt_rec = xt + base
+        xt_rec = to_data_range(xt_rec.clamp(-1.0, 1.0))
 
         if self.water_mask is not None:
-            xt = xt.masked_fill(~self.water_mask, float("nan"))
+            xt_rec = xt_rec.masked_fill(~self.water_mask, float("nan"))
 
-        return xt if target is None else (xt, loss_during_sampling)
+        return xt_rec if target is None else (xt_rec, loss_during_sampling)

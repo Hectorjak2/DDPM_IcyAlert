@@ -105,8 +105,9 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
         #regular sampling
         sample, loss_during_sampling = ddpm.sample(context=context, month=int(month), model=model, target=target) #sample already back to [0,1] range in function
 
-        #Sampling with wrong context
-        sample, no_context_loss= ddpm.sample(context=wrong_context, month=int(month), model=model, target=target)
+        #Sampling with wrong context. The residual is still added to the true day k, so the
+        #loss only reflects how much the network relies on its conditioning, not the wrong baseline.
+        sample, no_context_loss= ddpm.sample(context=wrong_context, month=int(month), model=model, target=target, base=context[:1])
 
         varying_t_loss = []
         #Testing different parts of t-range ability to produce SIC fields
@@ -161,7 +162,8 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
         x = torch.cat([context.nan_to_num(0.0).unsqueeze(0),
                        model.mask_channel.expand(1, -1, -1, -1)], dim=1)
         t = torch.zeros(1, device=context.device)
-        pred = model(x, t, month.unsqueeze(0))  # [1, 1, H, W], standardized
+        # The network predicts the residual k+1 - k; add day k back, as in train_network.
+        pred = x[:, 0:1] + model(x, t, month.unsqueeze(0))  # [1, 1, H, W], standardized
 
         # Back to SIC, clamped like the DDPM output, land set to NaN.
         pred = de_standardize(pred).clamp(0.0, 1.0).masked_fill(~model.water_mask, float("nan"))
