@@ -68,7 +68,7 @@ class TrainConfig:
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_TEST
+    dataset = DatasetChoice.CARRA_WEST
     experiment_name: str = f"{training_type}-residual"
     batch_size: int = 4
     epochs: int = 10
