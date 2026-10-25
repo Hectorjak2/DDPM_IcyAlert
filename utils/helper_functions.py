@@ -176,7 +176,7 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
             pickle.dump((samples, contexts, targets, times), open(f"{outdir}/samples.pkl", "wb"))
 
 
-def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM, unet:bool = False) -> Path:
+def dump_config_snapshot(train_cfg: TrainConfig ,ddpm: DDPM, unet_config:UnetConfig = UnetConfig(), ddpm_config:DDPMConfig = DDPMConfig(), unet:bool = False) -> Path:
     """Write the config values used by this run into the run's results dir.
 
     config.py keeps changing between runs, so snapshotting the values next to the
@@ -190,7 +190,7 @@ def dump_config_snapshot(train_cfg: TrainConfig, ddpm: DDPM, unet:bool = False) 
 
     lines = [f"Config snapshot -- {datetime.now().isoformat(timespec='seconds')}", ""]
     # Instances, not classes: default_factory fields only exist on instances.
-    for cfg in (UnetConfig(), DDPMConfig(), train_cfg):
+    for cfg in (unet_config, ddpm_config, train_cfg):
         lines.append(type(cfg).__name__)
         for f in fields(cfg):
             lines.append(f"    {f.name} = {getattr(cfg, f.name)!r}")

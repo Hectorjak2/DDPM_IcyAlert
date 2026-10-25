@@ -85,7 +85,7 @@ def train_ddpm(dataset: DatasetChoice,
     )
 
     print(f"Writing config snapshot")
-    dump_config_snapshot(train_config, ddpm)
+    dump_config_snapshot(train_config, ddpm, ddpm_config=ddpm_config)
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
@@ -160,7 +160,7 @@ def train_unet(dataset: DatasetChoice,
                 attention=unet_config.attention,
             )
     print(f"Writing config snapshot")
-    dump_config_snapshot(train_config, model, unet=True)
+    dump_config_snapshot(train_config, unet_config=unet_config, ddpm=model, unet=True)
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
