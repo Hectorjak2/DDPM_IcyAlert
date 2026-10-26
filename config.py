@@ -34,7 +34,7 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "cosine"
+    schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -46,7 +46,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 128
+    cosine_shift_res: int = 32
 
     analysis_sampling: bool = False
 
@@ -69,7 +69,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-residual"
+    experiment_name: str = f"{training_type}-residual-shif32"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

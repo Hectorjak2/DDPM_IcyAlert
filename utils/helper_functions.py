@@ -83,6 +83,7 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
     total_varying_loss = []
     total_sampling_loss = []
     total_no_context_loss = []
+    total_zero_context_loss = []
 
     # Own RNG so the drawn dates depend only on the seed, not on earlier use of the global one.
     date_rng = random.Random(train_cfg.sample_seed)
@@ -99,6 +100,7 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
 
         s, m = test_ds[wrong_idx]
         wrong_context = s[1:]
+        zero_context = torch.zeros_like(wrong_context)
 
         target = to_data_range(target) #[0,1]: for the running sampling loss and for storage
 
@@ -108,6 +110,8 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
         #Sampling with wrong context. The residual is still added to the true day k, so the
         #loss only reflects how much the network relies on its conditioning, not the wrong baseline.
         sample, no_context_loss= ddpm.sample(context=wrong_context, month=int(month), model=model, target=target, base=context[:1])
+
+        sample, zero_context_loss = ddpm.sample(context=zero_context, month=int(month), model=model, target=target, base=context[:1])
 
         varying_t_loss = []
         #Testing different parts of t-range ability to produce SIC fields
@@ -125,9 +129,10 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
         total_varying_loss.append(varying_t_loss)
         total_sampling_loss.append(loss_during_sampling)
         total_no_context_loss.append(no_context_loss)
+        total_zero_context_loss.append(zero_context_loss)
 
         #dump the samples after each iteration
-        pickle.dump((total_varying_loss, total_sampling_loss, total_no_context_loss), open(f"{outdir}/loss_stats.pkl", "wb"))
+        pickle.dump((total_varying_loss, total_sampling_loss, total_no_context_loss, total_zero_context_loss), open(f"{outdir}/loss_stats.pkl", "wb"))
         print(f"wrote to: {outdir}/loss_stats.pkl")
 
 @torch.no_grad()

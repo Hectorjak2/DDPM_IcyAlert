@@ -11,8 +11,7 @@ SCHEDULES = [
     Schedule("cosine"),
     Schedule("laplace", laplace_mu=0),
     Schedule("shifted_cosine", cosine_shift_res=64),
-    Schedule("shifted_cosine", cosine_shift_res=128),
-    Schedule("shifted_cosine", cosine_shift_res=256),
+    Schedule("shifted_cosine", cosine_shift_res=32),
 ]
 
 TIMESTEPS = 1000

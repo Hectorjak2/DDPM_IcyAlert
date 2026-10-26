@@ -1,145 +1,170 @@
-"""DDPM U-Net (Ho et al. 2020).
-
-A U-Net with Wide-ResNet residual blocks, GroupNorm, self-attention at a chosen
-resolution, and sinusoidal timestep conditioning injected into every residual
-block. The network predicts the noise epsilon and returns a tensor with the same
-shape as the input.
-
-Only ``torch`` is used.
-"""
-
-import math
+import os
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+def _valid_groups(channels: int, groups: int) -> int:
+    """Find largest divisor of channels that is <= groups"""
+    while groups > 1:
+        if channels % groups == 0:
+            return groups
+        groups -= 1
+    return 1
 
-def timestep_embedding(t: torch.Tensor, dim: int, max_period: float = 10000.0) -> torch.Tensor:
-    """Transformer sinusoidal position embedding of the diffusion timestep.
+def count_parameters(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    Args:
-        t: 1-D tensor of shape ``[B]`` holding (integer) timesteps.
-        dim: embedding dimension.
-        max_period: controls the lowest frequency.
-
-    Returns:
-        Tensor of shape ``[B, dim]``.
+class TimestepEmbedding(nn.Module): 
     """
-    half = dim // 2
-    freqs = torch.exp(
-        -math.log(max_period)
-        * torch.arange(half, device=t.device, dtype=torch.float32)
-        / half
-    )
-    args = t[:, None].float() * freqs[None, :]
-    emb = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-    if dim % 2:
-        emb = F.pad(emb, (0, 1))
-    return emb
-
-
-def _norm(ch: int, groups: int) -> nn.GroupNorm:
-    return nn.GroupNorm(min(groups, ch), ch)
-
-
-class Downsample(nn.Module):
-    """Strided 3x3 convolution that halves the spatial resolution."""
-
-    def __init__(self, ch: int):
+    Timestep embedding following Vaswani et al., 2017 (Attention is all you need)
+    """
+    def __init__(self, d: int): 
         super().__init__()
-        self.op = nn.Conv2d(ch, ch, 3, stride=2, padding=1)
+        self.d = d
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.op(x)
+    def forward(self, t: torch.Tensor): 
+        device = t.device
+        half = self.d // 2
+        
+        tmp = torch.arange(half, device=device)
+        freqs = 1.0 / (10000 ** (tmp / half))
+        args = t[:, None] * freqs[None, :]  # shape [B, half]
 
+        embedding = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)  # shape [B, d]
+        
+        return embedding 
 
-class Upsample(nn.Module):
-    """Nearest-neighbour upsample followed by a 3x3 convolution."""
-
-    def __init__(self, ch: int):
+class MonthlyEmbedding(nn.Module): 
+    """
+    Monthly embedding following The Fourier basis
+    """
+    def __init__(self, Nf: int): 
         super().__init__()
-        self.conv = nn.Conv2d(ch, ch, 3, padding=1)
+        self.Nf = Nf
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.interpolate(x, scale_factor=2, mode="nearest")
+    def forward(self, month: torch.Tensor):
+        device = month.device
+
+        tmp = torch.arange(1, (self.Nf+1), device=device)
+        const = (2 * torch.pi) / (12)
+        args = month[:, None] * const * tmp[None, :]  # shape [B, Nf]
+
+        embedding = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)  # shape [B, 2*Nf]
+
+        return embedding
+
+class Downsampling(nn.Module): 
+    """
+    Downsampling method for the U-Net architecture. Uses a 3x3 convolution with stride 2
+    """
+    def __init__(self, in_channels: int, out_channels: int): 
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+
+    def forward(self, x: torch.Tensor): 
         return self.conv(x)
 
 
-class ResBlock(nn.Module):
-    """Wide-ResNet style residual block with timestep conditioning.
-
-    GroupNorm -> SiLU -> Conv3x3, add projected time embedding,
-    GroupNorm -> SiLU -> Dropout -> Conv3x3, plus a 1x1 skip when channels change.
+class Upsampling(nn.Module):
     """
-
-    def __init__(self, in_ch: int, out_ch: int, t_dim: int, dropout: float = 0.0, groups: int = 32):
+    Upsampling method for the U-Net architecture. Uses nearest neighbor 
+    interpolation followed by a 3x3 convolution, following Ho et al. (2020).
+    """
+    def __init__(self, in_channels: int, out_channels: int): 
         super().__init__()
-        self.norm1 = _norm(in_ch, groups)
-        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
+        self.up1 = nn.Upsample(scale_factor=2, mode="nearest")
+        #self.up2   = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False) #another option for upsampling
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 
-        self.emb_proj = nn.Linear(t_dim, out_ch)
+    def forward(self, x: torch.Tensor): 
+        return self.conv(self.up1(x))
 
-        self.norm2 = _norm(out_ch, groups)
-        self.dropout = nn.Dropout(dropout)
-        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+class AttentionBlock(nn.Module): 
+    """
+    Factorized attention block. Instead of running attention on sequence length on all pixels in the field
+    (Which at the bottle neck is 152*152=23104 => 23104^2 ~ 500 million) we factorize and compute an approximate 
+    attention row and column wise. So for each row, each pixel in the row is compared to every other in the row: 
+    (152*152*152) *2 ~7 million.
 
-        self.skip = nn.Conv2d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
-
-    def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
-        h = self.conv1(F.silu(self.norm1(x)))
-        h = h + self.emb_proj(F.silu(t_emb))[:, :, None, None]
-        h = self.conv2(self.dropout(F.silu(self.norm2(h))))
-        return h + self.skip(x)
-
-
-class AttentionBlock(nn.Module):
-    """Multi-head spatial self-attention with a residual connection."""
-
-    def __init__(self, ch: int, groups: int = 32, num_heads: int = 4):
+    The q, k, v projections act on the full channel vector and are split into heads afterwards, so each
+    head learns its own projection. Rows and columns get separate projections. The output projection is
+    zero-initialised so the block starts as the identity and doesn't disturb the residual stream early on.
+    """
+    def __init__(self, ch: int, n_heads: int, groups: int = 8):
         super().__init__()
-        if ch % num_heads != 0:
-            num_heads = 1
-        self.num_heads = num_heads
-        self.norm = _norm(ch, groups)
-        self.qkv = nn.Conv2d(ch, ch * 3, 1)
-        self.proj = nn.Conv2d(ch, ch, 1)
+        assert ch%n_heads == 0, f"{ch} should be divisible by n_heads"
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.n_heads = n_heads
+        self._norm = nn.GroupNorm(_valid_groups(ch, groups), ch)
+        self.qkv_row = nn.Linear(ch, ch*3)
+        self.qkv_col = nn.Linear(ch, ch*3)
+        self.proj_out = nn.Linear(ch, ch)
+        nn.init.zeros_(self.proj_out.weight)
+        nn.init.zeros_(self.proj_out.bias)
+
+    def _attend(self, seq: torch.Tensor, qkv: nn.Linear):
+        """seq: [N, L, C] -> multi-head self-attention along L -> [N, L, C]"""
+        n, l, c = seq.shape
+        q, k, v = qkv(seq).reshape(n, l, 3, self.n_heads, c // self.n_heads).permute(2, 0, 3, 1, 4)  # each  (N, n_heads, L, c//n_heads)
+        out = F.scaled_dot_product_attention(q, k, v)
+        return out.permute(0, 2, 1, 3).reshape(n, l, c)
+
+    def forward(self, x:torch.Tensor):
         b, c, h, w = x.shape
-        qkv = self.qkv(self.norm(x))
-        qkv = qkv.reshape(b, 3, self.num_heads, c // self.num_heads, h * w)
-        q, k, v = qkv.unbind(1)                       # each [B, heads, d, HW]
-        # .contiguous() after the transpose: the fused flash/memory-efficient SDPA
-        # kernels silently fall back to the "math" backend on non-contiguous input,
-        # which materializes the full [B, heads, HW, HW] score matrix -- at the
-        # 152x152 bottleneck that's 31.8 GiB and OOMs a single A100. sdpa_kernel
-        # below then hard-fails instead of silently falling back, so a regression
-        # here shows up as an error, not a silent 30GB allocation.
-        q, k, v = (t.transpose(-1, -2).contiguous() for t in (q, k, v))  # [B, heads, HW, d]
-        # FLASH/EFFICIENT_ATTENTION are CUDA-only backends; on mps/cpu (local dev,
-        # see CLAUDE.md) fall back to whatever backend torch picks by default.
-        if x.is_cuda:
-            with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
-                out = F.scaled_dot_product_attention(q, k, v)   # [B, heads, HW, d]
-        else:
-            out = F.scaled_dot_product_attention(q, k, v)       # [B, heads, HW, d]
-        out = out.transpose(-1, -2).reshape(b, c, h, w)
-        return x + self.proj(out)
+        x_old = x
+        x = self._norm(x).permute(0, 2, 3, 1)  # [B, H, W, C], channels last so a reshape groups whole pixels
+
+        #Row wise: each sequence is one row of w pixels
+        out1 = self._attend(x.reshape(b*h, w, c), self.qkv_row).reshape(b, h, w, c)
+
+        #Column wise: each sequence is one column of h pixels
+        out2 = self._attend(x.transpose(1, 2).reshape(b*w, h, c), self.qkv_col).reshape(b, w, h, c).transpose(1, 2)
+
+        out = self.proj_out(out1 + out2).permute(0, 3, 1, 2)  # back to [B, C, H, W]
+        return x_old + out
 
 
-class TimestepBlock(nn.Module):
-    """Sequential container that forwards the time embedding only to ResBlocks."""
-
-    def __init__(self, layers):
+class ResidualBlock(nn.Module): 
+    """
+    Residual block for the U-Net architecture. 
+    """
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, month_emb_dim: int, groups: int = 8, dropout: float = 0.0): 
         super().__init__()
-        self.layers = nn.ModuleList(layers)
+        self.norm1 = nn.GroupNorm(_valid_groups(in_channels,  groups), in_channels)
+        self.norm2 = nn.GroupNorm(_valid_groups(out_channels,  groups), out_channels)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.time_emb_proj = nn.Linear(time_emb_dim, out_channels)
+        self.month_emb_proj = nn.Linear(month_emb_dim, out_channels)
+        self.activation = nn.SiLU()
+        self.dropout = dropout
 
-    def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
-        for layer in self.layers:
-            x = layer(x, t_emb) if isinstance(layer, ResBlock) else layer(x)
-        return x
+        self.skip = (
+            nn.Conv2d(in_channels, out_channels, 1, bias=False)
+            if in_channels != out_channels else nn.Identity()
+        )
+
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor, m_emb: torch.Tensor): 
+        """
+        Following Ho et al. (2020): 
+        h = SiLU(GN(x)) -> Conv2D -> Add time embedding -> SiLU(GN(h)) -> Dropout -> Conv2D -> Add internal skip connection
+        """
+        h = self.activation(self.norm1(x))
+        h = self.conv1(h)
+
+        # SiLU before projecting: the embedding MLPs end in a Linear, so without it the two Linears collapse into one
+        t_emb_proj = self.time_emb_proj(self.activation(t_emb))[:, :, None, None]  # reshape to [B, C, 1, 1]
+        m_emb_proj = self.month_emb_proj(self.activation(m_emb))[:, :, None, None]  # reshape to [B, C, 1, 1]
+
+        h = h + t_emb_proj + m_emb_proj
+
+        h = self.activation(self.norm2(h))
+        h = F.dropout(h, p=self.dropout, training=self.training)
+        h = self.conv2(h)
+
+        return h + self.skip(x)  # skip connection
 
 
 class BaseUnet(nn.Module):
@@ -204,326 +229,167 @@ class BaseUnet(nn.Module):
         print(f"Checkpoint loaded from {path}")
         return {k: v for k, v in checkpoint.items() if k not in ["model_state_dict", "optimizer_state_dict"]}
 
-
-class Unet(BaseUnet):
-    """DDPM U-Net - Resolution-agnostic.
-
-    Args:
-        in_channels: channels of the (noised) input image.
-        out_channels: channels of the predicted noise (usually == in_channels).
-        base_channels: channel count after the input convolution.
-        channel_mult: per-resolution channel multiplier; its length is the number
-            of downsampling levels.
-        num_res_blocks: residual blocks per resolution level.
-        attention_levels: which downsampling levels (0-indexed) get self-attention.
-            Level 0 is full resolution, level 1 is 1/2 resolution, etc.
-        mid_attention: whether the bottleneck gets a self-attention block. Independent
-            of ``attention_levels``, which only governs the down/up paths, so setting
-            ``attention_levels=()`` alone still leaves this block in place. Default
-            ``True`` matches Ho et al.; set ``False`` for a fully attention-free
-            network (see docs/architecture.md).
-        dropout: dropout probability inside residual blocks.
-        groups: number of groups for GroupNorm.
-        image_size: (deprecated, kept for compatibility) no longer used for architecture.
+class SimpleUnet(BaseUnet): 
     """
-
-    def __init__(
-        self,
-        in_channels: int = 1,
-        out_channels: int = 1,
-        base_channels: int = 128,
-        channel_mult: tuple = (1, 2, 2, 2, 4),
-        num_res_blocks: int = 2,
-        attention_levels: tuple = (3,),  # Default: attention at 1/8 resolution
-        mid_attention: bool = True,  # Bottleneck attention; separate from attention_levels
-        attention_resolutions: tuple = None,  # Deprecated, for backwards compat
-        dropout: float = 0.1,
-        groups: int = 32,
-        image_size: int = 128,  # Deprecated, kept for init compatibility
-    ):
+    A simple U-Net architecture
+    """
+    def __init__(self, in_channels: int, out_channels: int, time_emb_dim: int, Nf: int = 4, channels: list = [32, 64, 96, 128], groups: int = 8, dropout: float = 0.0, land_mask: torch.Tensor = None, device: str = "mps", n_res_blocks: int = 1, attention: bool = True): 
         super().__init__()
-        self.base_channels = base_channels
-        t_dim = base_channels * 4
-
-        # Handle backwards compatibility: convert attention_resolutions to attention_levels
-        if attention_resolutions is not None:
-            # Convert pixel resolutions to levels (approximate)
-            # For 128: 16px = 3 levels of downsampling, 32px = 2 levels, etc.
-            attention_levels = tuple(len(channel_mult) - 1 - level
-                                    for level in range(len(channel_mult)))
-
+        self.device = device
+        self.channels = channels
+        self.attention = attention
         self.time_mlp = nn.Sequential(
-            nn.Linear(base_channels, t_dim),
+            TimestepEmbedding(time_emb_dim),
+            nn.Linear(time_emb_dim, time_emb_dim * 4),
             nn.SiLU(),
-            nn.Linear(t_dim, t_dim),
+            nn.Linear(time_emb_dim * 4, time_emb_dim * 4)
         )
 
-        self.in_conv = nn.Conv2d(in_channels, base_channels, 3, padding=1)
+        self.month_mlp = nn.Sequential(
+            MonthlyEmbedding(Nf),
+            nn.Linear(2*Nf, time_emb_dim * 4),
+            nn.SiLU(),
+            nn.Linear(time_emb_dim * 4, time_emb_dim * 4)
+        )
 
-        # ---- downsampling path ----
+        self.base_channel = channels[0]
+
+        self.in_conv = nn.Conv2d(in_channels, self.base_channel, 3, padding=1)
+        emb = time_emb_dim * 4  # after the MLP, the embedding dimension is expanded to 4x
+
+        #downsampling path
         self.down_blocks = nn.ModuleList()
-        ch = base_channels
-        skip_chs = [ch]
-        for level, mult in enumerate(channel_mult):
-            out_ch = base_channels * mult
-            for _ in range(num_res_blocks):
-                layers = [ResBlock(ch, out_ch, t_dim, dropout, groups)]
-                ch = out_ch
-                if level in attention_levels:
-                    layers.append(AttentionBlock(ch, groups))
-                self.down_blocks.append(TimestepBlock(layers))
-                skip_chs.append(ch)
-            if level != len(channel_mult) - 1:
-                self.down_blocks.append(TimestepBlock([Downsample(ch)]))
+        prev_channels = self.base_channel 
+        skip_chs = [prev_channels]  # after in_conv
+        for level, ch in enumerate(self.channels):
+            for _ in range(n_res_blocks):
+                self.down_blocks.append(ResidualBlock(prev_channels, ch, emb, emb, groups, dropout))
+                prev_channels = ch
                 skip_chs.append(ch)
 
-        # ---- bottleneck ----
-        # Attention here is quadratic in H*W/64, which at 1216x1216 means 23k tokens.
-        # Keep it optional so attention_levels=() really does mean no attention anywhere.
-        mid_layers = [ResBlock(ch, ch, t_dim, dropout, groups)]
-        if mid_attention:
-            mid_layers.append(AttentionBlock(ch, groups))
-        mid_layers.append(ResBlock(ch, ch, t_dim, dropout, groups))
-        self.mid = TimestepBlock(mid_layers)
+            if level != len(self.channels) - 1:  # no downsample after the last level
+                self.down_blocks.append(Downsampling(ch, ch))
+                skip_chs.append(ch)
 
-        # ---- upsampling path ----
+        #bottleneck
+        if self.attention: 
+            self.bottleneck = nn.ModuleList([
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
+                AttentionBlock(prev_channels, n_heads=4, groups=groups),
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
+        else: 
+            self.bottleneck = nn.ModuleList([
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout),
+                ResidualBlock(prev_channels, prev_channels, emb, emb, groups, dropout)])
+
+        #upsampling path
         self.up_blocks = nn.ModuleList()
-        for level, mult in reversed(list(enumerate(channel_mult))):
-            out_ch = base_channels * mult
-            for i in range(num_res_blocks + 1):
-                layers = [ResBlock(ch + skip_chs.pop(), out_ch, t_dim, dropout, groups)]
-                ch = out_ch
-                if level in attention_levels:
-                    layers.append(AttentionBlock(ch, groups))
-                if level != 0 and i == num_res_blocks:
-                    layers.append(Upsample(ch))
-                self.up_blocks.append(TimestepBlock(layers))
+        for level, ch in reversed(list(enumerate(self.channels))):
+            for _ in range(n_res_blocks + 1):  # one ResBlock per skip saved at this level
+                self.up_blocks.append(ResidualBlock(prev_channels + skip_chs.pop(), ch, emb, emb, groups, dropout))
+                prev_channels = ch
+            if level != 0:  # no upsample after the full-resolution level
+                self.up_blocks.append(Upsampling(ch, ch))
 
         assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
 
-        self.out = nn.Sequential(
-            _norm(ch, groups),
-            nn.SiLU(),
-            nn.Conv2d(ch, out_channels, 3, padding=1),
-        )
+        #final norm + conv
+        self.final_norm = nn.GroupNorm(_valid_groups(prev_channels, groups), prev_channels)
+        self.final_conv = nn.Conv2d(prev_channels, out_channels, kernel_size=3, padding=1)
+        # Zero-initialised so the output starts at 0: the residual UNet baseline then starts
+        # exactly at persistence, and the DDPM at predicting zero noise (as in Dhariwal & Nichol).
+        nn.init.zeros_(self.final_conv.weight)
+        nn.init.zeros_(self.final_conv.bias)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """Args:
-            x: ``[B, in_channels, H, W]`` noised image.
-            t: ``[B]`` timesteps.
+        #### For UNET baseline 
+        if land_mask is not None:
+            land_mask = land_mask.to(self.device).float()
+            while land_mask.dim() < 4:
+                land_mask = land_mask.unsqueeze(0)  # -> [1, 1, H, W]
+            # Match the [-1, 1] scale of the image channel: +1 water, -1 land.
+            self.mask_channel = land_mask * 2.0 - 1.0
+            self.water_mask = land_mask.bool()
+            self.image_size = max(land_mask.shape[-2:])
+        else:
+            self.mask_channel = None
+            self.water_mask = None
 
-        Returns:
-            ``[B, out_channels, H, W]`` predicted noise.
-        """
-        t_emb = self.time_mlp(timestep_embedding(t, self.base_channels))
+    def forward(self, x: torch.Tensor, t: torch.Tensor, month: torch.Tensor):
+        t_emb = self.time_mlp(t.float())
+        m_emb = self.month_mlp(month.float())
+        
+        x = self.in_conv(x)
+        skip_connections = [x]
 
-        h = self.in_conv(x)
-        skips = [h]
         for block in self.down_blocks:
-            h = block(h, t_emb)
-            skips.append(h)
+            x = block(x, t_emb, m_emb) if isinstance(block, ResidualBlock) else block(x)
+            skip_connections.append(x)
 
-        h = self.mid(h, t_emb)
+        for block in self.bottleneck:
+            if isinstance(block, ResidualBlock):
+                x = block(x, t_emb, m_emb)
+            else: 
+                x = block(x)
 
         for block in self.up_blocks:
-            h = block(torch.cat([h, skips.pop()], dim=1), t_emb)
+            if isinstance(block, ResidualBlock):
+                x = block(torch.cat([x, skip_connections.pop()], dim=1), t_emb, m_emb)
+            else:
+                x = block(x)
 
-        return self.out(h)
+        assert not skip_connections, f"skip connection bookkeeping mismatch: {skip_connections}"
+        
+        return self.final_conv(F.silu(self.final_norm(x)))
 
+def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default"):
+    model.to(device)
+    model.train()
+    os.makedirs(f"results/{experiment_name}", exist_ok=True)
 
-class TestUnet(Unet):
-    """DDPM U-Net for the CARRA2 TEST region (256x256).
+    for epoch in range(epochs):
+        total_loss = 0.0
+        total_p = 0.0
+        for step, batch in enumerate(dataloader):
+            batch, month = batch
+            batch = batch.to(device)
+            month = month.to(device)
+            batch = torch.nan_to_num(batch, nan=0.0)  # Replace NaNs with zeros
+            
+            target = batch[:, 0:1]  # target is the first channel (k+1); keep [B, 1, H, W] so it doesn't broadcast against pred
 
-    Same architecture as ``Unet`` (Wide-ResNet blocks, GroupNorm, attention,
-    timestep conditioning) — only the defaults change, dropping one
-    downsampling level and shrinking the channel count so it trains quickly
-    on local hardware (mps/cpu) instead of the full WEST-region config.
-    With ``channel_mult=(1, 2, 2, 4)`` the bottleneck sits at 32x32 (1024
-    tokens), so attention there stays cheap.
-    """
+            assert model.mask_channel is not None, "Land mask channel is not set in the model."
+            x = torch.concat([batch[:,1:], model.mask_channel.expand(batch.shape[0], -1, -1, -1)], dim=1)  #keeping only the context (k, k-1) and removing the target (k+1) from the input to the model. Concatenating the land mask channel
 
-    def __init__(
-        self,
-        in_channels: int = 2,
-        out_channels: int = 1,
-        base_channels: int = 64,
-        channel_mult: tuple = (1, 2, 2, 4),
-        num_res_blocks: int = 2,
-        attention_levels: tuple = (3,),
-        mid_attention: bool = True,
-        dropout: float = 0.1,
-        groups: int = 32,
-        **kwargs,
-    ):
-        super().__init__(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            base_channels=base_channels,
-            channel_mult=channel_mult,
-            num_res_blocks=num_res_blocks,
-            attention_levels=attention_levels,
-            mid_attention=mid_attention,
-            dropout=dropout,
-            groups=groups,
-            **kwargs,
-        )
+            optimizer.zero_grad()
+            t = torch.Tensor([0]).to(device)
 
+            # The network predicts the residual k+1 - k, as in ConditionalDDPM; reconstruct
+            # k+1 by adding day k back. The loss on the reconstruction equals the loss on the
+            # residual, so it stays directly comparable to persistence below.
+            pred = batch[:, 1:2] + model(x, t, month)
 
-class UnetSmall(BaseUnet):
-    """Compact DDPM U-Net for small images (e.g., 28×28, 32×32).
+            assert pred.shape == target.shape
+            se = (pred - target) ** 2
+            loss = se[model.water_mask.expand_as(se)].mean()
 
-    Uses fewer channels, fewer blocks, and minimal attention for efficiency.
+            with torch.no_grad():
+                se_p = (batch[:, 1:2] - target) ** 2          # persistence: x(k+1) = x(k)
+                loss_p = se_p[model.water_mask.expand_as(se_p)].mean()
 
-    Args:
-        in_channels: channels of the (noised) input image.
-        out_channels: channels of the predicted noise (usually == in_channels).
-        base_channels: channel count after the input convolution (default: 32 for small images).
-        channel_mult: per-level channel multiplier; length = number of downsampling levels.
-        num_res_blocks: residual blocks per resolution level (1-2 recommended for small images).
-        attention_levels: which downsampling levels get self-attention (usually empty for tiny images).
-        dropout: dropout probability inside residual blocks.
-        groups: number of groups for GroupNorm.
-    """
-
-    def __init__(
-        self,
-        in_channels: int = 1,
-        out_channels: int = 1,
-        base_channels: int = 32,
-        channel_mult: tuple = (1, 2, 4),  # 3 levels instead of 5
-        num_res_blocks: int = 1,  # Fewer blocks
-        attention_levels: tuple = (),  # No attention for small images
-        dropout: float = 0.1,
-        groups: int = 8,  # Fewer groups (ch must be divisible)
-    ):
-        super().__init__()
-        self.base_channels = base_channels
-        t_dim = base_channels * 4
-
-        self.time_mlp = nn.Sequential(
-            nn.Linear(base_channels, t_dim),
-            nn.SiLU(),
-            nn.Linear(t_dim, t_dim),
-        )
-
-        self.in_conv = nn.Conv2d(in_channels, base_channels, 3, padding=1)
-
-        # ---- downsampling path ----
-        self.down_blocks = nn.ModuleList()
-        ch = base_channels
-        skip_chs = [ch]
-        for level, mult in enumerate(channel_mult):
-            out_ch = base_channels * mult
-            for _ in range(num_res_blocks):
-                layers = [ResBlock(ch, out_ch, t_dim, dropout, groups)]
-                ch = out_ch
-                if level in attention_levels:
-                    layers.append(AttentionBlock(ch, groups))
-                self.down_blocks.append(TimestepBlock(layers))
-                skip_chs.append(ch)
-            if level != len(channel_mult) - 1:
-                self.down_blocks.append(TimestepBlock([Downsample(ch)]))
-                skip_chs.append(ch)
-
-        # ---- bottleneck (simplified for small images) ----
-        self.mid = TimestepBlock([
-            ResBlock(ch, ch, t_dim, dropout, groups),
-            ResBlock(ch, ch, t_dim, dropout, groups),
-        ])
-
-        # ---- upsampling path ----
-        self.up_blocks = nn.ModuleList()
-        for level, mult in reversed(list(enumerate(channel_mult))):
-            out_ch = base_channels * mult
-            for i in range(num_res_blocks + 1):
-                layers = [ResBlock(ch + skip_chs.pop(), out_ch, t_dim, dropout, groups)]
-                ch = out_ch
-                if level in attention_levels:
-                    layers.append(AttentionBlock(ch, groups))
-                if level != 0 and i == num_res_blocks:
-                    layers.append(Upsample(ch))
-                self.up_blocks.append(TimestepBlock(layers))
-
-        assert not skip_chs, f"skip connection bookkeeping mismatch: {skip_chs}"
-
-        self.out = nn.Sequential(
-            _norm(ch, groups),
-            nn.SiLU(),
-            nn.Conv2d(ch, out_channels, 3, padding=1),
-        )
-
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """Args:
-            x: ``[B, in_channels, H, W]`` noised image.
-            t: ``[B]`` timesteps.
-
-        Returns:
-            ``[B, out_channels, H, W]`` predicted noise.
-        """
-        t_emb = self.time_mlp(timestep_embedding(t, self.base_channels))
-
-        h = self.in_conv(x)
-        skips = [h]
-        for block in self.down_blocks:
-            h = block(h, t_emb)
-            skips.append(h)
-
-        h = self.mid(h, t_emb)
-
-        for block in self.up_blocks:
-            h = block(torch.cat([h, skips.pop()], dim=1), t_emb)
-
-        return self.out(h)
+            total_loss += loss.item()
+            total_p += loss_p.item()                          # init total_p = 0.0 next to total_loss
+            print(f"Epoch {epoch} step {step} -- loss {loss.item():.4f}")
+            if step % 50 == 0:
+                print(f"Epoch {epoch} step {step} -- loss {total_loss/(step+1):.4f}  "
+                    f"persistence {total_p/(step+1):.4f}  ratio {total_loss/max(total_p,1e-8):.3f}")
+            
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
 
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("FULL UNET (for 128×128+)")
-    print("=" * 60)
-    model = Unet(attention_levels=(3,))
-    n_params = sum(p.numel() for p in model.parameters())
-    print(f"Parameters: {n_params / 1e6:.1f}M")
-    print()
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}")
 
-    # Test with different sizes
-    for size in [128, 256, 512]:
-        x = torch.randn(2, 1, size, size)
-        t = torch.randint(0, 1000, (2,))
-        with torch.no_grad():
-            out = model(x, t)
-        assert out.shape == x.shape, f"Shape mismatch: {out.shape} != {x.shape}"
-        print(f"✓ {size}×{size}: input {tuple(x.shape)} → output {tuple(out.shape)}")
-
-    print()
-    print("=" * 60)
-    print("TEST UNET (for 256×256 CARRA2 TEST region)")
-    print("=" * 60)
-    model_test = TestUnet()
-    n_params = sum(p.numel() for p in model_test.parameters())
-    print(f"Parameters: {n_params / 1e6:.1f}M")
-    print()
-
-    x = torch.randn(2, 2, 256, 256)
-    t = torch.randint(0, 1000, (2,))
-    with torch.no_grad():
-        out = model_test(x, t)
-    assert out.shape == (2, 1, 256, 256), f"Shape mismatch: {out.shape}"
-    print(f"✓ 256×256: input {tuple(x.shape)} → output {tuple(out.shape)}")
-
-    print()
-    print("=" * 60)
-    print("SMALL UNET (for 28×28, 32×32)")
-    print("=" * 60)
-    model_small = UnetSmall(attention_levels=())
-    n_params = sum(p.numel() for p in model_small.parameters())
-    print(f"Parameters: {n_params / 1e6:.2f}M")
-    print()
-
-    # Test with small sizes (note: use 32 instead of 28 since 28 % 8 != 0)
-    for size in [32, 64]:
-        x = torch.randn(2, 1, size, size)
-        t = torch.randint(0, 1000, (2,))
-        with torch.no_grad():
-            out = model_small(x, t)
-        assert out.shape == x.shape, f"Shape mismatch: {out.shape} != {x.shape}"
-        print(f"✓ {size}×{size}: input {tuple(x.shape)} → output {tuple(out.shape)}")
+    model.save_weights(f"results/{experiment_name}/final_weights.pth")
+    return model

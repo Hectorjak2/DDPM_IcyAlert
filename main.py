@@ -5,8 +5,7 @@ from utils.helper_functions import download_samples, dump_config_snapshot, sched
 
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
-from models.unet import Unet, TestUnet, UnetSmall
-from models.hec_unet import SimpleUnet, train_network, count_parameters
+from models.unet import SimpleUnet, train_network, count_parameters
 from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
 
 device = get_device()
@@ -26,7 +25,7 @@ def train_ddpm(dataset: DatasetChoice,
          ddpm_config: DDPMConfig = DDPMConfig,
          train_config: TrainConfig = TrainConfig,
          unet_config: UnetConfig = UnetConfig
-         ) -> tuple[Unet | UnetSmall, DDPM, CARRA2 | FashionMNIST]:
+         ) -> tuple[SimpleUnet, DDPM, CARRA2 | FashionMNIST]:
     
     if not isinstance(dataset, DatasetChoice):
         raise ValueError("Please specify a valid dataset")
