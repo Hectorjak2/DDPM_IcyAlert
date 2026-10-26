@@ -38,8 +38,7 @@ def download_conditional_samples(ddpm: ConditionalDDPM, model, test_ds, train_cf
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
-    outdir = train_cfg.output_dir
-
+    outdir = f"{train_cfg.output_dir}/{train_cfg.experiment_name}"
     Path(outdir).mkdir(parents=True, exist_ok=True)
 
     samples = []
@@ -75,7 +74,7 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
-    outdir = train_cfg.output_dir
+    outdir = f"{train_cfg.output_dir}/{train_cfg.experiment_name}"
 
     Path(outdir).mkdir(parents=True, exist_ok=True)
 
@@ -140,7 +139,7 @@ def download_unet_samples(model, test_ds, n_of_samples: int, train_cfg: TrainCon
     """Deterministic UNet baseline. Saves (samples, contexts, targets, times) in [0, 1] with
     land as NaN -- the same layout as download_conditional_samples, minus sampling_losses."""
     print("Sampling from the trained model ...")
-    outdir = train_cfg.output_dir
+    outdir = f"{train_cfg.output_dir}/{train_cfg.experiment_name}"
     # test_ds must carry the *training* statistics (see train_unet in main.py).
     mean, std = float(test_ds.mean), float(test_ds.std)
     
@@ -189,7 +188,8 @@ def dump_config_snapshot(train_cfg: TrainConfig ,ddpm: DDPM, unet_config:UnetCon
     realised noise schedule is included because it depends on the image size, which
     only exists at runtime.
     """
-    out_dir = Path("results") / train_cfg.experiment_name
+
+    out_dir = Path(train_cfg.output_dir) / train_cfg.experiment_name
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "config.txt"
 

@@ -341,10 +341,10 @@ class SimpleUnet(BaseUnet):
         
         return self.final_conv(F.silu(self.final_norm(x)))
 
-def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default"):
+def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default", output_dir: str = "results"):
     model.to(device)
     model.train()
-    os.makedirs(f"results/{experiment_name}", exist_ok=True)
+    os.makedirs(f"{output_dir}/{experiment_name}", exist_ok=True)
 
     for epoch in range(epochs):
         total_loss = 0.0
@@ -391,5 +391,5 @@ def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, opt
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}")
 
-    model.save_weights(f"results/{experiment_name}/final_weights.pth")
+    model.save_weights(f"{output_dir}/{experiment_name}/final_weights.pth")
     return model

@@ -10,7 +10,7 @@ from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
 
 device = get_device()
 
-def train_ddpm(dataset: DatasetChoice,
+def run_ddpm(dataset: DatasetChoice,
          timesteps: int,
          batch_size: int,
          epochs: int,
@@ -88,11 +88,11 @@ def train_ddpm(dataset: DatasetChoice,
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
-        model.load_weights(path=f"results/{load_weights}", device=device)
+        model.load_weights(path=f"{train_config.output_dir}/{load_weights}", device=device)
 
     if train: 
         print("Training the model... ")
-        ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr)
+        ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr, train_config=train_config)
         print("Training complete...")
         
     if sampling: 
@@ -112,7 +112,7 @@ def train_ddpm(dataset: DatasetChoice,
 
     return model, ddpm, train_ds
 
-def train_unet(dataset: DatasetChoice,
+def run_unet(dataset: DatasetChoice,
          batch_size: int,
          epochs: int,
          lr: int,
@@ -124,7 +124,8 @@ def train_unet(dataset: DatasetChoice,
          train: bool = True, 
          load_weights: str = None,
          train_config: TrainConfig = TrainConfig,
-         unet_config: UnetConfig = UnetConfig): 
+         unet_config: UnetConfig = UnetConfig,
+         initialization_seed: int = 0): 
     
     if not isinstance(dataset, DatasetChoice):
             raise ValueError("Please specify a valid dataset")
@@ -163,12 +164,12 @@ def train_unet(dataset: DatasetChoice,
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
-        model.load_weights(path=f"results/{load_weights}", device=device)
+        model.load_weights(path=f"{train_config.output_dir}/{load_weights}", device=device)
 
     if train: 
         print("Training the model...")
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        model = train_network(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name)
+        model = train_network(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name, output_dir=train_config.output_dir)
 
     if sampling: 
         print("Sampling the model...")
@@ -181,7 +182,7 @@ def train_unet(dataset: DatasetChoice,
 
 if __name__ == "__main__":
     if TrainConfig.training_type == "unet": 
-        model = train_unet(
+        model = run_unet(
             dataset=TrainConfig.dataset,
             forecast_period = TrainConfig.forecasting_slice,
             batch_size=TrainConfig.batch_size,
@@ -194,7 +195,7 @@ if __name__ == "__main__":
         )
 
     elif TrainConfig.training_type == "ddpm":
-        model, ddpm, train_ds = train_ddpm(
+        model, ddpm, train_ds = run_ddpm(
             dataset=TrainConfig.dataset,
             forecast_period = TrainConfig.forecasting_slice,
             timesteps=DDPMConfig.timesteps,

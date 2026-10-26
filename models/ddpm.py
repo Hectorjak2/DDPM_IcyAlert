@@ -6,7 +6,7 @@ import torch
 from torch.optim import Adam
 import torch.nn.functional as F
 from typing import Optional
-from config import DDPMConfig
+from config import DDPMConfig, TrainConfig
 from utils.dataloader import to_data_range
 
 
@@ -243,12 +243,12 @@ class DDPM:
 
         return xt
 
-    def train(self, model, dataloader, experiment_name: str, device: str, timesteps: int, epochs: int, lr: float = 1e-3): 
+    def train(self, model, dataloader, experiment_name: str, device: str, timesteps: int, epochs: int, lr: float = 1e-3, train_config = TrainConfig()): 
         self.output_name = f"{model._get_name()}_{dataloader.dataset.name}"
 
         n_params = sum(p.numel() for p in model.parameters())
         print(f"parameters: {n_params / 1e6:.1f}M")
-        os.makedirs(f"results/{experiment_name}", exist_ok=True)
+        os.makedirs(f"{train_config.output_dir}/{experiment_name}", exist_ok=True)
 
         model.to(device)
         model.train()
@@ -304,7 +304,7 @@ class DDPM:
             )
             print(f"Epoch {epoch} loss by timestep bucket -- {summary}")
 
-        model.save_weights(f"results/{experiment_name}/final_weights.pth")
+        model.save_weights(f"{train_config.output_dir}/{experiment_name}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
     def __init__(self, *args, forecast_period: slice, **kwargs):

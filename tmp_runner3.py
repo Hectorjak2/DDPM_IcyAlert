@@ -1,5 +1,5 @@
 from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
-from main import train_ddpm, train_unet
+from main import run_ddpm, run_unet
 import os 
 
 SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results")
@@ -14,7 +14,7 @@ ddpm_conf = DDPMConfig()
 ddpm_conf.analysis_sampling = True
 ddpm_conf.schedule = "cosine"
 
-model = train_unet(
+model = run_unet(
             dataset=train_conf.dataset,
             forecast_period = train_conf.forecasting_slice,
             batch_size=train_conf.batch_size,

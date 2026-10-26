@@ -14,7 +14,6 @@ from typing import Tuple
 
 from models.models import DatasetChoice
 
-
 @dataclass
 class UnetConfig:
     """
@@ -33,7 +32,7 @@ class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 1000
+    timesteps: int = 10
     schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
@@ -55,6 +54,7 @@ TEST_SLICE = slice("2020-01-01", "2025-12-31")
 SMOKE_TEST_SLICE = slice("2000-01-01", "2000-12-31")
 MELT_SEASON = [slice(f"{year}-04-01", f"{year}-09-30") for year in range(2020, 2025)]
 COOL_SEASON = [slice(f"{year}-10-01", f"{year + 1}-03-31") for year in range(2020, 2024)]
+
 
 @dataclass
 class TrainConfig:
@@ -78,5 +78,14 @@ class TrainConfig:
     sampling: bool = True
 
     #Saving samples setting 
-    output_dir: str = f"results/{experiment_name}"
+    output_dir: str = f"results"
 
+@dataclass
+class EnsembleConfig:
+    """
+    Ensemble sampling (see ensemble.py). Dates, test slice and dataset come from TrainConfig.
+    """
+    method: str = "ddpm" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise)
+    weights: str = "results/ddpm-testinglaplace/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
+    n_members: int = 10
+    experiment_name: str = f"ensemble-{method}"
