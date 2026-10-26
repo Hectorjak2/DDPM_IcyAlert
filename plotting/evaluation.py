@@ -9,6 +9,11 @@ Reads ``results/<run>/samples.pkl`` written by
 4. ``forecast_grid``  -- truth (top) vs prediction (bottom) for four samples.
 5. ``forecast_rows_melt`` / ``forecast_rows_cool`` -- four forecast rows each, one per
    target month, spread over the melt (Apr-Sep) and cool (Oct-Mar) season.
+6. ``ice_edge_error`` -- prediction for one cool- and one melt-season sample, with the
+   true (black) and predicted (magenta) 0.15 ice edge and large-error pixels in red.
+
+Also prints a table of the per-sample MSE over water, overall and per season, next to
+the persistence and climatology baselines (see ``models.climatology``).
 
 Works for both CARRA2-TEST and CARRA2-WEST without a mask file: land is already NaN in
 the pickled targets and samples, so water = ``isfinite(target)`` at whatever resolution
@@ -24,7 +29,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
+from models.climatology import Climatology
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MUTED, REF_LINESTYLE
 from utils.dataloader import to_data_range
 
@@ -38,6 +46,14 @@ MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration c
 # Target (k+1) months per season, in seasonal order. Same split as MELT_SEASON /
 # COOL_SEASON in config.py.
 SEASONS = {"melt": (4, 5, 6, 7, 8, 9), "cool": (10, 11, 12, 1, 2, 3)}
+
+ICE_EDGE = 0.15  # SIC contour that defines the ice edge
+# Squared-error threshold for the red overlay (|error| > ~0.32). Absolute rather than a
+# per-sample percentile, so the amount of red is comparable between the two seasons.
+ERROR_THRESHOLD = 0.1
+# Preferred target month per season in ice_edge_error: maximum (Mar) and minimum (Sep)
+# ice extent.
+EDGE_MONTHS = {"cool": 3, "melt": 9}
 
 
 def _month(date) -> str:
@@ -266,8 +282,107 @@ def plot_forecast_rows(data, out_dir, indices, name: str):
     plt.close(fig)
 
 
-def make_all(path, row_index: int = 0, grid_indices=None):
+def edge_index(data, season: str) -> int | None:
+    """First sample whose target month is EDGE_MONTHS[season], else the first sample
+    season_indices picks for that season (None if the season has no samples)."""
+    for i, dates in enumerate(data["times"]):
+        if pd.Timestamp(dates[0]).month == EDGE_MONTHS[season]:
+            return i
+    picks = season_indices(data, season, n=1)
+    return picks[0] if picks else None
+
+
+def plot_ice_edge_error(data, out_dir, indices: dict):
+    """Prediction per season with the true (black) and predicted (magenta) ice edge and
+    the pixels whose squared error exceeds ERROR_THRESHOLD in red.
+
+    ``indices`` maps season name -> sample index; seasons mapped to None are left out.
+    """
+    panels = [(season, i) for season, i in indices.items() if i is not None]
+    if not panels:
+        print("No cool- or melt-season samples -- skipping ice_edge_error.")
+        return
+    n = len(panels)
+
+    fig = plt.figure()
+    gs = fig.add_gridspec(1, n + 1, width_ratios=[1] * n + [0.06])
+    for col, (season, i) in enumerate(panels):
+        target, pred = data["targets"][i], data["predictions"][i]
+        ax = fig.add_subplot(gs[0, col])
+        img = _show_field(ax, pred)
+
+        sq_err = (pred - target) ** 2
+        overlay = np.zeros((*target.shape, 4))
+        overlay[np.isfinite(sq_err) & (sq_err > ERROR_THRESHOLD)] = (1.0, 0.0, 0.0, 0.6)
+        ax.imshow(overlay, origin="lower", interpolation="none")
+
+        ax.contour(target, levels=[ICE_EDGE], colors="black", linewidths=0.8)
+        ax.contour(pred, levels=[ICE_EDGE], colors="magenta", linewidths=0.8)
+
+        ax.set_title(f"{season.capitalize()}: {_month(data['times'][i][0])}")
+        _clean_image_axis(ax)
+    fig.colorbar(img, cax=fig.add_subplot(gs[0, n])).set_label("SIC", labelpad=4)
+
+    handles = [
+        Line2D([], [], color="black", linewidth=0.8, label="true ice edge"),
+        Line2D([], [], color="magenta", linewidth=0.8, label="predicted ice edge"),
+        Patch(facecolor="red", alpha=0.6, label=rf"squared error $> {ERROR_THRESHOLD}$"),
+    ]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3)
+
+    savefig(fig, out_dir, "ice_edge_error", width=TEXTWIDTH_IN, height=3.2)
+    plt.close(fig)
+
+
+def _water_mse(pred, target) -> float:
+    sq_err = (pred - target) ** 2
+    return float(sq_err[np.isfinite(sq_err)].mean())
+
+
+def print_stats(data):
+    """Per-sample MSE over water, averaged over all samples and per season, next to the
+    persistence (forecast k+1 = k) and climatology (mean of the k+1 calendar month over
+    the training years) baselines, and the share of water pixels whose squared error
+    exceeds ERROR_THRESHOLD (the red pixels in ice_edge_error)."""
+    climatology = Climatology.for_shape(data["targets"][0].shape)
+    if climatology is None:
+        print("No climatology fitted for this grid -- run `python -m models.climatology` "
+              "and copy its .npy next to the data to add the climatology column.")
+
+    rows = []
+    for pred, target, k, dates in zip(data["predictions"], data["targets"], data["k"],
+                                      data["times"]):
+        sq_err = (pred - target) ** 2
+        water = np.isfinite(sq_err)
+        month = pd.Timestamp(dates[0]).month
+        rows.append({
+            "season": next(s for s, months in SEASONS.items() if month in months),
+            "mse": float(sq_err[water].mean()),
+            "persistence": _water_mse(k, target),
+            "climatology": (_water_mse(climatology.predict(month), target)
+                            if climatology is not None else np.nan),
+            "large": float((sq_err[water] > ERROR_THRESHOLD).mean()),
+        })
+    df = pd.DataFrame(rows)
+
+    header = (f"{'':<6} {'n':>4} {'MSE (mean ± std)':>20} {'persistence MSE':>16} "
+              f"{'climatology MSE':>16} {f'SE > {ERROR_THRESHOLD}':>10}")
+    print("\nMSE over water, per sample, averaged over samples")
+    print(header)
+    print("-" * len(header))
+    for name, group in [("all", df), *((s, df[df.season == s]) for s in ("cool", "melt"))]:
+        if group.empty:
+            continue
+        mse = f"{group.mse.mean():.5f} ± {group.mse.std(ddof=0):.5f}"
+        clim = f"{group.climatology.mean():.5f}" if climatology is not None else "-"
+        print(f"{name:<6} {len(group):>4} {mse:>20} {group.persistence.mean():>16.5f} "
+              f"{clim:>16} {group.large.mean():>10.2%}")
+    print()
+
+
+def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None):
     out_dir, data = load_samples(path)
+    print_stats(data)
     plot_sampling_loss(data, out_dir)
     plot_calibration(data, out_dir)
     plot_forecast_row(data, out_dir, index=row_index)
@@ -278,6 +393,11 @@ def make_all(path, row_index: int = 0, grid_indices=None):
             plot_forecast_rows(data, out_dir, indices, f"forecast_rows_{season}")
         else:
             print(f"No {season}-season samples -- skipping forecast_rows_{season}.")
+    if edge_indices is None:
+        edge_indices = {season: edge_index(data, season) for season in ("cool", "melt")}
+    else:
+        edge_indices = dict(zip(("cool", "melt"), edge_indices))
+    plot_ice_edge_error(data, out_dir, edge_indices)
     print(f"Wrote figures to {out_dir}/")
 
 
@@ -287,5 +407,9 @@ if __name__ == "__main__":
     parser.add_argument("--row-index", type=int, default=0, help="sample shown in forecast_row")
     parser.add_argument("--grid-indices", type=int, nargs="+", default=None,
                         help="samples shown in forecast_grid (default: first four)")
+    parser.add_argument("--edge-indices", type=int, nargs=2, default=None,
+                        metavar=("COOL", "MELT"),
+                        help="samples shown in ice_edge_error (default: first Mar and Sep)")
     args = parser.parse_args()
-    make_all(args.run, row_index=args.row_index, grid_indices=args.grid_indices)
+    make_all(args.run, row_index=args.row_index, grid_indices=args.grid_indices,
+             edge_indices=args.edge_indices)

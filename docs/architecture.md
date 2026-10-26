@@ -12,6 +12,7 @@
   - `p_sample(model, x, t)` — reverse diffusion process, one denoising step, parameterised through a clamped predicted `x0`.
   - `sample(model)` — generates a sample from pure noise by iterating `p_sample` backwards; returns data-range `[0, 1]` with land set to NaN.
   - `train(model, dataloader, device, timesteps, epochs, lr)` — training loop with periodic checkpointing and per-timestep-bucket loss reporting.
+- **[models/climatology.py](../models/climatology.py)** — Climatology baseline: forecasts k+1 as the mean SIC of its calendar month over `TRAINING_SLICE` (training years only, so the test dates never leak in). Fitting reads every training day, so it is run once on HPC (`python -m models.climatology --area CARRA_WEST`) and cached as `climatology_<AREA>.npy` under `CARRA2_DATA_ROOT`. [plotting/evaluation.py](../plotting/evaluation.py) `print_stats` loads the cache whose grid matches the samples and prints its MSE next to the persistence baseline (k+1 = k).
 - **[models/unet.py](../models/unet.py)** — UNet architectures.
   - `Unet` (general-purpose, resolution-agnostic) — configurable via `base_channels`, `channel_mult`, `num_res_blocks`, `attention_levels`, `mid_attention`, etc. Defaults: `base_channels=128`, `channel_mult=(1,2,2,2,4)`, `num_res_blocks=2`, `attention_levels=(3,)`, `mid_attention=True` (~78.7M params). Note that `attention_levels` governs the down/up paths only — the bottleneck is controlled separately by `mid_attention` (see Attention Placement).
   - `UnetSmall` (fixed for small images) — compact version for FashionMNIST (28×28).
