@@ -85,7 +85,7 @@ class EnsembleConfig:
     """
     Ensemble sampling (see ensemble.py). Dates, test slice and dataset come from TrainConfig.
     """
-    method: str = "unet" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise)
+    method: str = "dropout" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise)
     weights: str = "results/unet-residual/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     n_members: int = 10
-    experiment_name: str = f"ensemble-{method}-drop"
+    experiment_name: str = f"ensemble-{method}2"
