@@ -69,7 +69,9 @@ class CARRA2(Dataset):
             self.da = da.isel(y=slice(750, 1006), x=slice(100, 356))
         elif self.area == DatasetChoice.CARRA_WEST: 
             self.da = da
-
+        elif self.area == DatasetChoice.CARRA_CROPPED: 
+            self.da = da.isel(y=slice(0, 896), x=slice(200, 1096))
+        
         else:
             raise ValueError(
                 "The full domain is no longer available through CARRA2 (only "

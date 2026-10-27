@@ -45,7 +45,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 32
+    cosine_shift_res: int = 64
 
     analysis_sampling: bool = False
 
@@ -68,8 +68,8 @@ class TrainConfig:
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_WEST
-    experiment_name: str = f"{training_type}-residual-shif32"
+    dataset = DatasetChoice.CARRA_CROPPED
+    experiment_name: str = f"{training_type}-residual-shif64_crop"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
