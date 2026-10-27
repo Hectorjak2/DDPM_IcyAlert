@@ -38,7 +38,7 @@ def run_ddpm(dataset: DatasetChoice,
         download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)])
 
     #Defining the dataset and dataloader
-    if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST): 
+    if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST, DatasetChoice.CARRA_CROPPED): 
         if forecast_period: 
             train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=TRAINING_SLICE, batch_dim=False)
         else: 
