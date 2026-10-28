@@ -1,9 +1,7 @@
 #!/bin/bash	
 
-#SBATCH --job-name=hcjtest
-#SBATCH --output=hcjtest-%J.out
 #SBATCH --cpus-per-task=1
-#SBATCH --time=5:00
+#SBATCH --time=12:00
 #SBATCH --mem=16gb
 #SBATCH --gres=gpu
 #SBATCH --nodelist=comp-gpu13
@@ -11,6 +9,12 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --partition=titans
 #SBATCH --export=ALL
+
+## Usage: ./titan.s <name>  (self-submits with job name and output file set to <name>)
+if [[ -z $SLURM_JOB_ID ]]; then
+  NAME=${1:-hcjtest}
+  exec sbatch --job-name="$NAME" --output="$NAME-%J.out" "$0" "$@"
+fi
 
 ## INFO
 echo "Node: $(hostname)"
@@ -21,6 +25,8 @@ SCRATCH=/scratch/$USER
 if [[ ! -d $SCRATCH ]]; then
   mkdir $SCRATCH
 fi
+
+export CARRA2_DATA_ROOT=/scratch/s234822/CARRA2_DAILY
 
 source ~/.bashrc
 source .venv/bin/activate

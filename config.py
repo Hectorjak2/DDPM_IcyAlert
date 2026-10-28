@@ -62,7 +62,7 @@ class TrainConfig:
     Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "ddpm" #"unet", "ddpm"
+    training_type: str = "unet" #"unet", "ddpm"
 
     #Forecasting settings: 
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
