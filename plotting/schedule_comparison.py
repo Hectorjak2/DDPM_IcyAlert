@@ -10,12 +10,13 @@ SCHEDULES = [
     Schedule("linear", beta_start=ddpm_conf.beta_start, beta_end=ddpm_conf.beta_end),
     Schedule("cosine"),
     Schedule("laplace", laplace_mu=0),
+    Schedule("shifted_cosine", cosine_shift_res=45),
     Schedule("shifted_cosine", cosine_shift_res=64),
     Schedule("shifted_cosine", cosine_shift_res=128),
 ]
 
 TIMESTEPS = 1000
-IMAGE_SIZE = 1216  # CARRA2-WEST; sets the shifted cosine's delta, the others ignore it
+IMAGE_SIZE = 896  # CARRA2-WEST; sets the shifted cosine's delta, the others ignore it
 
 def plot_schedule(betas, alphas, alphas_bar, name: str = "schedule", output_dir: str = "figures"):
     """Plot betas, alphas, and alphas_bar of one schedule against the diffusion timestep."""

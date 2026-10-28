@@ -45,7 +45,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 128
+    cosine_shift_res: int = 45
 
     analysis_sampling: bool = False
 
@@ -62,14 +62,14 @@ class TrainConfig:
     Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "unet" #"unet", "ddpm"
+    training_type: str = "ddpm" #"unet", "ddpm"
 
     #Forecasting settings: 
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-residual-cropped"
+    experiment_name: str = f"{training_type}-residual-cropped_shif45"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

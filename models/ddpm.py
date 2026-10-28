@@ -72,7 +72,7 @@ class DDPM:
         self,
         timesteps: int = 1000,
         device: str = "mps",
-        image_size: int = 1216,
+        image_size: int = 896,
         land_mask: Optional[torch.Tensor] = None,
         schedule: str = None,
     ):
