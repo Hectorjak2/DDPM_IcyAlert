@@ -70,7 +70,7 @@ class CARRA2(Dataset):
         elif self.area == DatasetChoice.CARRA_WEST: 
             self.da = da
         elif self.area == DatasetChoice.CARRA_CROPPED: 
-            self.da = da.isel(y=slice(0, 896), x=slice(200, 1096))
+            self.da = da.isel(y=slice(220, 1116), x=slice(0, 896))
         
         else:
             raise ValueError(
