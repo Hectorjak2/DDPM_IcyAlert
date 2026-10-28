@@ -11,12 +11,12 @@ from utils.dataloader import CARRA2
 
 SCHEDULES = [
     Schedule("linear"),
-    Schedule("laplace", laplace_mu=0),
     Schedule("cosine"),
+    Schedule("laplace", laplace_mu=0),
     Schedule("shifted_cosine", cosine_shift_res=64),
     Schedule("shifted_cosine", cosine_shift_res=128),
-    Schedule("shifted_cosine", cosine_shift_res=256),
 ]
+
 TIMESTEPS = 1000
 T_SHOWN = list(range(100, TIMESTEPS + 1, 100))  # 1-indexed steps; schedule index is t - 1
 DATE = "2000-03-15"  # near the annual sea-ice maximum

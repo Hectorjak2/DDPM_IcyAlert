@@ -11,7 +11,7 @@ SCHEDULES = [
     Schedule("cosine"),
     Schedule("laplace", laplace_mu=0),
     Schedule("shifted_cosine", cosine_shift_res=64),
-    Schedule("shifted_cosine", cosine_shift_res=32),
+    Schedule("shifted_cosine", cosine_shift_res=128),
 ]
 
 TIMESTEPS = 1000
@@ -51,7 +51,19 @@ def plot_schedule_comparison(schedules: dict, name: str = "schedule_comparison",
     for ax in axes:
         ax.set_xlabel("timestep $t$")
     # The parameter labels are too long for one panel, so the legend spans both above them
-    fig.legend(*axes[0].get_legend_handles_labels(), loc="lower center", ncol=2, bbox_to_anchor=(0.5, 1.0))
+    # Zero padding and tight spacing keep it hugging the panels instead of floating above them
+    fig.legend(
+        *axes[0].get_legend_handles_labels(),
+        loc="lower center",
+        ncol=2,
+        bbox_to_anchor=(0.5, 0.97),
+        borderaxespad=0,
+        borderpad=0,
+        labelspacing=0.2,
+        columnspacing=1.2,
+        handlelength=1.5,
+        handletextpad=0.5,
+    )
 
     savefig(fig, output_dir, name, width=TEXTWIDTH_IN, height=2.8)
 

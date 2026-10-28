@@ -61,7 +61,7 @@ class Climatology:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--area", default=DatasetChoice.CARRA_WEST.value,
+    parser.add_argument("--area", default=DatasetChoice.CARRA_CROPPED.value,
                         choices=[DatasetChoice.CARRA_WEST.value, DatasetChoice.CARRA_TEST.value])
     args = parser.parse_args()
     area = DatasetChoice(args.area)
