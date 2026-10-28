@@ -17,7 +17,7 @@ import os
 import xarray as xr
 from utils.prepare_west_zarr import process_west
 
-def download_carra2_monthly_data(save_name: str, years: list[str]):
+def download_carra2_monthly_data(save_name: str, years: list[str], data_dir: str = "./data"):
     ds_name = "CARRA2_DAILYY"
     
     dataset = "reanalysis-pan-carra-means"
@@ -25,8 +25,11 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
         "time_aggregation": "daily",
         "level_type": "single_levels",
         "product_type": "analysis_based",
-        "year": [
-            "2000"
+        "year": ['2000',
+            '2001','2002','2003','2004','2005','2006','2007',
+            '2008','2009','2010','2011','2012','2013',
+            '2014','2015','2016','2017','2018','2019',
+            '2020','2021','2022','2023','2024','2025'
         ],
         "month": [
             "01", "02", "03",
@@ -54,14 +57,16 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
 
     #client = cdsapi.Client()
 
-    grib_file = f"./data/{ds_name}/all.grib"
-    #os.makedirs(os.path.dirname(grib_file), exist_ok=True)
+    # Absolute output dir, so results don't depend on the cwd the script is launched from
+    out_dir = os.path.join(os.path.abspath(os.path.expanduser(data_dir)), ds_name)
+    os.makedirs(out_dir, exist_ok=True)
+
+    grib_file = os.path.join(out_dir, "all.grib")
 
     #client.retrieve(dataset, request).download(grib_file)
     print(f"Downloaded CARRA2 data to {grib_file}")
     ds = xr.open_dataset(grib_file, engine="cfgrib", chunks={"time": 1})
-    save_path = f'./data/{ds_name}/{save_name}.zarr'
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    save_path = os.path.join(out_dir, f"{save_name}.zarr")
     ds.to_zarr(save_path, mode="w")
     print(f"Converted GRIB file to Zarr format at {save_path}")
 
@@ -69,7 +74,11 @@ def download_carra2_monthly_data(save_name: str, years: list[str]):
     print(f"Deleted temporary GRIB file {grib_file}")
 
     #Recropping and only keeping SIC values: EDIT prepare_west_zarr.py for changes
-    process_west(f"data/{ds_name}/dataset.zarr", f"data/{ds_name}/west.zarr")
+    process_west(save_path, os.path.join(out_dir, "west.zarr"))
 
 if __name__ == "__main__":
-    download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)])
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data-dir", default="./data", help="Root directory for output, e.g. /scratch/<user>/data")
+    args = parser.parse_args()
+    download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)], data_dir=args.data_dir)
