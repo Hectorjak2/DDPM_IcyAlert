@@ -88,5 +88,5 @@ class EnsembleConfig:
     method: str = "deep" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
     weights: str = "results/unet-residual/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
-    n_members: int = 1
+    n_members: int = 10
     experiment_name: str = f"ensemble-{method}_tester"

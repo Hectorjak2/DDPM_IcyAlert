@@ -13,6 +13,7 @@ All write {output_dir}/{experiment_name}/ensemble_samples.pkl as (samples, conte
 the layout of download_unet_samples except that each entry of samples is [n_members, 1, H, W].
 Dates are drawn with TrainConfig.sample_seed, so they match the single-forecast runs.
 """
+import argparse
 import pickle
 import random
 from pathlib import Path
@@ -32,22 +33,49 @@ import os
 device = get_device()
 ENSEMBLE_SEEDS = [i for i in range(EnsembleConfig.n_members)]
 
-def train_ensemble():
+def claim_seed(ensemble_path: Path, seed: int, force: bool = False) -> bool:
     """
-    This function reads results/ensemble dir and checks what seed models have already been trained on.
+    Mark member_{seed} as taken by this job by creating member_{seed}/claimed. Creating it with
+    O_EXCL is atomic, so two jobs starting at once can't both get the same seed. force=True
+    takes the seed even if it is already claimed (to rerun a crashed or killed member).
+    """
+    member_dir = ensemble_path / f"member_{seed}"
+    member_dir.mkdir(parents=True, exist_ok=True)
+    claim = member_dir / "claimed"
+    if force:
+        claim.unlink(missing_ok=True)
+    try:
+        fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    os.write(fd, f"job {os.environ.get('LSB_JOBID', 'local')}\n".encode())
+    os.close(fd)
+    return True
+
+def train_ensemble(seed: int | None = None):
+    """
+    Train one member of the deep ensemble into results/ensembles/member_{seed}.
+
+    seed=None picks the first seed in ENSEMBLE_SEEDS that is neither trained nor claimed by a
+    running job; the pick happens when the job starts, not when it is submitted. Passing a seed
+    trains that one, even if it is claimed, so a crashed member can be rerun with --seed.
     """
     ensemble_path = Path("results/ensembles")
     ensemble_path.mkdir(parents=True, exist_ok=True)
 
-    # A member counts as trained once its final weights exist, so a crashed run is retrained.
-    trained = {seed for seed in ENSEMBLE_SEEDS if (ensemble_path / f"member_{seed}" / "final_weights.pth").exists()}
-    remaining = [seed for seed in ENSEMBLE_SEEDS if seed not in trained]
-    print(f"{len(remaining)} remaining seeds: {remaining}")
-    if not remaining:
-        print("All ensemble members are trained")
-        return
-
-    selected_seed = remaining[0]
+    if seed is not None:
+        claim_seed(ensemble_path, seed, force=True)
+        selected_seed = seed
+    else:
+        # A member counts as trained once its final weights exist.
+        trained = {s for s in ENSEMBLE_SEEDS if (ensemble_path / f"member_{s}" / "final_weights.pth").exists()}
+        remaining = [s for s in ENSEMBLE_SEEDS if s not in trained]
+        print(f"{len(remaining)} untrained seeds: {remaining}")
+        selected_seed = next((s for s in remaining if claim_seed(ensemble_path, s)), None)
+        if selected_seed is None:
+            print("Every untrained seed is claimed by another job; nothing to do. "
+                  "If one crashed, rerun it with --seed <seed>.")
+            return
     print(f"Selected {selected_seed}")
 
     train_conf = TrainConfig()
@@ -216,5 +244,11 @@ def sample_ensemble(ens_cfg: EnsembleConfig, train_cfg: TrainConfig, unet_cfg: U
 
 
 if __name__ == "__main__":
-    #train_ensemble()
-    sample_ensemble(EnsembleConfig(), TrainConfig(), UnetConfig(), DDPMConfig())
+    parser = argparse.ArgumentParser()
+    # ENSEMBLE_SEED is for HPC, where `bsub < run.sh` can't pass arguments: `ENSEMBLE_SEED=3 bsub < run.sh`.
+    parser.add_argument("--seed", type=int, default=os.environ.get("ENSEMBLE_SEED"),
+                        help="train this ensemble member; default is the first one not trained or running")
+    args = parser.parse_args()
+
+    train_ensemble(args.seed)
+    #sample_ensemble(EnsembleConfig(), TrainConfig(), UnetConfig(), DDPMConfig())
