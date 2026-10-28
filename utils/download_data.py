@@ -25,11 +25,16 @@ def download_carra2_monthly_data(save_name: str, years: list[str], data_dir: str
         "time_aggregation": "daily",
         "level_type": "single_levels",
         "product_type": "analysis_based",
-        "year": ['2000',
-            '2001','2002','2003','2004','2005','2006','2007',
-            '2008','2009','2010','2011','2012','2013',
-            '2014','2015','2016','2017','2018','2019',
-            '2020','2021','2022','2023','2024','2025'
+        "year": [
+            "2000", "2001", "2002",
+            "2003", "2004", "2005",
+            "2006", "2007", "2008",
+            "2009", "2010", "2011",
+            "2012", "2013", "2014",
+            "2015", "2016", "2017",
+            "2018", "2019", "2020",
+            "2021", "2022", "2023",
+            "2024", "2025"
         ],
         "month": [
             "01", "02", "03",
@@ -54,8 +59,7 @@ def download_carra2_monthly_data(save_name: str, years: list[str], data_dir: str
         "variable": ["sea_ice_area_fraction"]
     }
 
-
-    #client = cdsapi.Client()
+    client = cdsapi.Client()
 
     # Absolute output dir, so results don't depend on the cwd the script is launched from
     out_dir = os.path.join(os.path.abspath(os.path.expanduser(data_dir)), ds_name)
@@ -63,7 +67,7 @@ def download_carra2_monthly_data(save_name: str, years: list[str], data_dir: str
 
     grib_file = os.path.join(out_dir, "all.grib")
 
-    #client.retrieve(dataset, request).download(grib_file)
+    client.retrieve(dataset, request).download(grib_file)
     print(f"Downloaded CARRA2 data to {grib_file}")
     ds = xr.open_dataset(grib_file, engine="cfgrib", chunks={"time": 1})
     save_path = os.path.join(out_dir, f"{save_name}.zarr")
