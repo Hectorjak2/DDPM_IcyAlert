@@ -14,10 +14,12 @@ import numpy as np
 
 from config import TRAINING_SLICE
 from models.models import DatasetChoice
-from utils.dataloader import CARRA2, CARRA2_DATA_ROOT
+from utils.dataloader import CARRA2, CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
 
 
 def cache_path(area: DatasetChoice) -> Path:
+    if area == DatasetChoice.CARRA_CROPPED:
+        return Path(CARRA2_DATA_ROOT) / "climatology_cropped.npy"
     return Path(CARRA2_DATA_ROOT) / f"climatology_{area.value}.npy"
 
 
@@ -46,10 +48,14 @@ class Climatology:
     def for_shape(cls, shape: tuple[int, int]):
         """Load the cached climatology whose grid matches ``shape``, or None if none has
         been fitted for it."""
-        for area in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST):
+        for area in (DatasetChoice.CARRA_CROPPED, DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST):
             path = cache_path(area)
             if path.exists():
                 clim = cls.load(path)
+                # The climatology is a per-pixel mean, so a WEST-sized fit cropped to the
+                # CARRA_CROPPED window equals one fitted on the crop directly
+                if area == DatasetChoice.CARRA_CROPPED and clim.means.shape[1:] != tuple(shape):
+                    clim = cls(clim.means[:, CROPPED_Y, CROPPED_X])
                 if clim.means.shape[1:] == tuple(shape):
                     return clim
         return None
@@ -62,7 +68,8 @@ class Climatology:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--area", default=DatasetChoice.CARRA_CROPPED.value,
-                        choices=[DatasetChoice.CARRA_WEST.value, DatasetChoice.CARRA_TEST.value])
+                        choices=[DatasetChoice.CARRA_CROPPED.value, DatasetChoice.CARRA_WEST.value,
+                                 DatasetChoice.CARRA_TEST.value])
     args = parser.parse_args()
     area = DatasetChoice(args.area)
     Climatology.fit(area).save(cache_path(area))

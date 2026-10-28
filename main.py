@@ -125,7 +125,7 @@ def run_unet(dataset: DatasetChoice,
          load_weights: str = None,
          train_config: TrainConfig = TrainConfig,
          unet_config: UnetConfig = UnetConfig,
-         initialization_seed: int = 0): 
+         initialization_seed: int | None = None):
     
     if not isinstance(dataset, DatasetChoice):
             raise ValueError("Please specify a valid dataset")
@@ -138,7 +138,7 @@ def run_unet(dataset: DatasetChoice,
         download_carra2_monthly_data("dataset", [f"20{i:02d}" for i in range(24)])
 
     #Defining the dataset and dataloader
-    if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST): 
+    if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST, DatasetChoice.CARRA_CROPPED): 
         train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=TRAINING_SLICE, batch_dim=False, standardize=True)
 
     dataloader = torch.utils.data.DataLoader(
@@ -146,6 +146,11 @@ def run_unet(dataset: DatasetChoice,
         batch_size=batch_size,
         shuffle=True,
     )
+
+    # Seeds the global RNG, so the seed fixes the initial weights and also the batch order and
+    # dropout masks during training (a deep ensemble member, Lakshminarayanan et al. 2017).
+    if initialization_seed is not None:
+        torch.manual_seed(initialization_seed)
 
     model = SimpleUnet(
                 in_channels=3,

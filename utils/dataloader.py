@@ -17,6 +17,10 @@ CARRA_TEST_MASK = None
 # the repo checkout. Defaults to the repo-relative path used for local dev.
 CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILY")
 
+# CARRA_CROPPED window in WEST-local coordinates (896x896)
+CROPPED_Y = slice(220, 1116)
+CROPPED_X = slice(0, 896)
+
 
 def to_model_range(x: torch.Tensor) -> torch.Tensor:
     """Map data in [0, 1] to the [-1, 1] range the diffusion process assumes."""
@@ -70,7 +74,7 @@ class CARRA2(Dataset):
         elif self.area == DatasetChoice.CARRA_WEST: 
             self.da = da
         elif self.area == DatasetChoice.CARRA_CROPPED: 
-            self.da = da.isel(y=slice(220, 1116), x=slice(0, 896))
+            self.da = da.isel(y=CROPPED_Y, x=CROPPED_X)
         
         else:
             raise ValueError(
