@@ -18,7 +18,7 @@ import xarray as xr
 from utils.prepare_west_zarr import process_west
 
 def download_carra2_monthly_data(save_name: str, years: list[str], data_dir: str = "./data"):
-    ds_name = "CARRA2_DAILYY"
+    ds_name = "CARRA2_DAILY"
     
     dataset = "reanalysis-pan-carra-means"
     request = {
