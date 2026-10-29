@@ -7,8 +7,10 @@ SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results")
 unet_conf = UnetConfig()
 
 train_conf = TrainConfig()
-train_conf.experiment_name = "unet-ens-samples"
+train_conf.experiment_name = "unet-rollout-m0"
 train_conf.output_dir = f"results"
+train_conf.lead_months = 6
+
 
 model = run_unet(
             dataset=train_conf.dataset,
