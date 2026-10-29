@@ -159,8 +159,8 @@ def plot_sampling_loss(data, out_dir):
 def calibration_stats(data):
     """Prediction per target-SIC bin, pooled over all water pixels of all samples.
 
-    Returns (centers, counts, filled, (mean, q25, median, q75)), the statistics only over
-    the bins in ``filled``.
+    Returns (centers, filled, (mean, q25, q75)), the statistics only over the bins in
+    ``filled``.
     """
     target = np.concatenate([t.ravel() for t in data["targets"]]).astype(np.float64)
     pred = np.concatenate([p.ravel() for p in data["predictions"]]).astype(np.float64)
@@ -172,27 +172,27 @@ def calibration_stats(data):
     counts = np.bincount(bins, minlength=N_BINS)
     # Group predictions by bin with one sort instead of a boolean mask per bin.
     per_bin = np.split(pred[np.argsort(bins, kind="stable")], np.cumsum(counts)[:-1])
-    stats = np.full((N_BINS, 4), np.nan)  # mean, q25, median, q75
+    stats = np.full((N_BINS, 3), np.nan)  # mean, q25, q75
     for k, p in enumerate(per_bin):
         if p.size:
-            stats[k] = [p.mean(), *np.percentile(p, [25, 50, 75])]
+            stats[k] = [p.mean(), *np.percentile(p, [25, 75])]
     centers = (np.arange(N_BINS) + 0.5) / N_BINS
 
     # CARRA2 has (almost) no SIC between 0 and ~0.05, which leaves the 0-0.01 bin -- the
     # bulk of all water pixels -- isolated between empty bins, and a line does not draw
-    # through NaNs. Curves therefore run through the populated bins only, bridging the gap;
-    # the count panel below shows that the bridged bins are (near-)empty. Bins with only a
-    # handful of pixels are bridged too: their quantiles are noise and draw spurious kinks.
+    # through NaNs. Curves therefore run through the populated bins only, bridging the gap.
+    # Bins with only a handful of pixels are bridged too: their quantiles are noise and draw
+    # spurious kinks.
     filled = counts >= MIN_BIN_PIXELS
-    return centers, counts, filled, stats[filled].T
+    return centers, filled, stats[filled].T
 
 
 def plot_calibration(leads, out_dir):
-    """Calibration per lead time: for each lead, the prediction per target-SIC bin over a
-    bar chart of the pixels per bin. One panel per lead, at most MAX_CALIBRATION_COLS per
-    row (1x1 for a one-month forecast, 2x3 for a six-month rollout), titled with the lead.
+    """Calibration per lead time: for each lead, the prediction per target-SIC bin. One
+    panel per lead, at most MAX_CALIBRATION_COLS per row (1x1 for a one-month forecast, 2x3
+    for a six-month rollout), titled with the lead.
 
-    Shows mean, median and interquartile range rather than mean +- std: within a bin the
+    Shows mean and interquartile range rather than mean +- std: within a bin the
     predictions are bimodal (a misplaced ice edge gives ~0 or ~1 where the target is
     intermediate), so the std sits near its 0/1-mixture maximum in every bin and says
     little, while the quartiles show the split.
@@ -203,50 +203,41 @@ def plot_calibration(leads, out_dir):
 
     fig = plt.figure()
     # A legend row on top: inside the panels, the band and curves leave no free corner.
-    gs = fig.add_gridspec(1 + rows, cols, height_ratios=[0.5 if cols == 1 else 0.3] + [4] * rows)
-    first = first_n = None
+    gs = fig.add_gridspec(1 + rows, cols, height_ratios=[0.5 if cols == 1 else 0.3] + [3] * rows)
+    first = None
     for i, data in enumerate(leads):
         r, c = divmod(i, cols)
-        centers, counts, filled, (mean, q25, median, q75) = calibration_stats(data)
+        centers, filled, (mean, q25, q75) = calibration_stats(data)
 
-        # Nested, so tight_layout spaces the leads apart but keeps each count panel under its curves.
-        panel = gs[1 + r, c].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.15)
-        ax = fig.add_subplot(panel[0], sharex=first, sharey=first)
-        ax_n = fig.add_subplot(panel[1], sharex=ax, sharey=first_n)
-        first, first_n = first or ax, first_n or ax_n
+        ax = fig.add_subplot(gs[1 + r, c], sharex=first, sharey=first)
+        first = first or ax
 
         ax.plot([0, 1], [0, 1], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE,
                 label="perfect")
         ax.fill_between(centers[filled], q25, q75, color=COLORS[0], alpha=0.25, linewidth=0,
                         label="interquartile range")
         ax.plot(centers[filled], mean, color=COLORS[0], label="mean")
-        ax.plot(centers[filled], median, color=COLORS[2], linewidth=1.0, label="median")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
-        ax.tick_params(labelbottom=False)
         if n > 1:
             ax.set_title(f"Lead: {i + 1}")
 
-        ax_n.bar(centers, counts, width=1 / N_BINS, color=COLORS[3], linewidth=0)
-        ax_n.set_yscale("log")
         if c == 0:
             ax.set_ylabel("predicted SIC")
-            ax_n.set_ylabel("pixels")
         else:
             ax.tick_params(labelleft=False)
-            ax_n.tick_params(labelleft=False)
         # x axis labelled only on the lowest panel of each column
         if i + cols >= n:
-            ax_n.set_xlabel("target SIC")
+            ax.set_xlabel("target SIC")
         else:
-            ax_n.tick_params(labelbottom=False)
+            ax.tick_params(labelbottom=False)
 
     ax_legend = fig.add_subplot(gs[0, :])
     ax_legend.axis("off")
-    ax_legend.legend(*first.get_legend_handles_labels(), loc="center", ncol=2 if cols == 1 else 4)
+    ax_legend.legend(*first.get_legend_handles_labels(), loc="center", ncol=2 if cols == 1 else 3)
 
     width = TEXTWIDTH_IN / 2 if cols == 1 else TEXTWIDTH_IN
-    height = 3.4 if cols == 1 else 0.4 + 2.6 * rows
+    height = 2.8 if cols == 1 else 0.4 + 2.1 * rows
     savefig(fig, out_dir, "calibration", width=width, height=height)
     plt.close(fig)
 
@@ -451,13 +442,12 @@ def print_stats(data):
 
 
 def plot_mse_by_lead(leads, out_dir):
-    """MSE over water against lead time, averaged over all samples, with the persistence and
-    climatology baselines. Each point is the mean of the per-sample MSE, as in print_stats's
-    "all" row."""
+    """MSE over water against lead time, averaged over all samples, with the climatology
+    baseline. Each point is the mean of the per-sample MSE, as in print_stats's "all" row."""
     climatology = _load_climatology(leads[0]["targets"][0].shape)
     lead_times = np.arange(1, len(leads) + 1)
     errors = [sample_errors(data, climatology) for data in leads]
-    series = [("mse", "model", COLORS[0], "o"), ("persistence", "persistence", COLORS[2], "s")]
+    series = [("mse", "model", COLORS[0], "o")]
     if climatology is not None:
         series.append(("climatology", "climatology", COLORS[3], "^"))
 
