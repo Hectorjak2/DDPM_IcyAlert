@@ -16,7 +16,7 @@ members strictly below the truth would pile every tie into rank 0 and fake a U s
 Also prints the spread-skill pair per subset and season: mean ensemble spread next to the RMSE
 of the ensemble mean, which should be about equal for a calibrated ensemble.
 
-Run from the repo root:  python -m plotting.ensemble_evaluation <run_name | path/to/ensemble_samples.pkl>
+Run from the repo root:  python -m plotting.ensemble_evaluation <run_name | path/to/ensemble_samples.pkl> [--lead L]
 """
 import argparse
 import pickle
@@ -33,11 +33,12 @@ SUBSETS = {"water": "all water", "miz": r"marginal ice zone (day $k$)"}
 TIE_SEED = 0  # fixes the random tie-breaking, so the figure is reproducible
 
 
-def load_ensemble(path: str | Path):
+def load_ensemble(path: str | Path, lead: int = 1):
     """Load an ensemble_samples.pkl, given its path or the run's results directory/name.
 
     Returns ``(run_dir, data)`` where ``members`` is a list of [M, H, W] arrays and
-    ``targets`` and ``k`` lists of [H, W] arrays, all in [0, 1] with land as NaN.
+    ``targets`` and ``k`` lists of [H, W] arrays, all in [0, 1] with land as NaN. For a
+    rollout, ``lead`` picks the forecast of k+lead; ``times`` then holds (k+lead, k, k-1).
     """
     path = Path(path)
     if path.suffix != ".pkl":
@@ -47,10 +48,10 @@ def load_ensemble(path: str | Path):
         samples, contexts, targets, times, member_seeds = pickle.load(f)
 
     data = {
-        "members": [s[:, 0].numpy() for s in samples],
-        "targets": [_as_data_range(t)[0].numpy() for t in targets],
+        "members": [s[:, lead - 1].numpy() for s in samples],  # samples are [M, lead_months, H, W]
+        "targets": [_as_data_range(t)[lead - 1].numpy() for t in targets],
         "k": [_as_data_range(c)[0].numpy() for c in contexts],  # contexts are [2, H, W] = (k, k-1)
-        "times": times,  # (k+1, k, k-1) dates
+        "times": [(d[lead - 1], d[-2], d[-1]) for d in times],  # (k+lead, k, k-1) dates
         "member_seeds": member_seeds,
     }
     return path.parent, data
@@ -148,9 +149,11 @@ def plot_rank_histogram(n_members, stats, out_dir, name):
     plt.close(fig)
 
 
-def make_all(path, out_dir: str | None = None):
-    run_dir, data = load_ensemble(path)
-    out_dir = run_dir if out_dir is None else out_dir
+def make_all(path, out_dir: str | None = None, lead: int = 1):
+    run_dir, data = load_ensemble(path, lead)
+    if out_dir is None:
+        out_dir = run_dir if lead == 1 else run_dir / f"lead{lead}"
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
     n_members, stats = rank_statistics(data)
     print_spread_skill(n_members, stats)
     plot_rank_histogram(n_members, stats, out_dir, "rank_histogram")
@@ -161,5 +164,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("run", help="run name under results/, its directory, or an ensemble_samples.pkl path")
     parser.add_argument("--out-dir", default=None, help="where the PDF goes (default: next to the pickle)")
+    parser.add_argument("--lead", type=int, default=1,
+                        help="for a rollout, score the forecast of k+lead (default out dir: lead<lead>/)")
     args = parser.parse_args()
-    make_all(args.run, out_dir=args.out_dir)
+    make_all(args.run, out_dir=args.out_dir, lead=args.lead)

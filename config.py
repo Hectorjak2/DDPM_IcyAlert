@@ -45,7 +45,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 45
+    cosine_shift_res: int = 94
 
     analysis_sampling: bool = False
 
@@ -69,12 +69,13 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-residual-cropped_shif45"
+    experiment_name: str = f"{training_type}-rescropped-shif94"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
+    lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
 
     #Saving samples setting 

@@ -1,7 +1,7 @@
 """Thesis figures for the sampling analysis of a conditional DDPM.
 
 Reads ``results/<run>/loss_stats.pkl`` written by
-``utils.helper_functions.analysis_sampling`` and writes two PDFs next to it:
+``utils.sampling.analysis_sampling`` and writes two PDFs next to it:
 
 1. ``truncated_sampling_loss`` -- final MSE when sampling with only the first t reverse
    steps (t = 100, 200, ..., T), averaged over samples.

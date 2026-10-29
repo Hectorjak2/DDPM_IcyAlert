@@ -103,6 +103,10 @@ class CARRA2(Dataset):
     def __len__(self):
         return self.da.sizes["time"]
 
+    def to_sic(self, x: torch.Tensor) -> torch.Tensor:
+        """Inverse of the scaling in __getitem__: back to SIC in [0, 1], land stays NaN."""
+        return x * float(self.std) + float(self.mean) if self.standardize else to_data_range(x)
+
     def __getitem__(self, idx):
         arr = self.da.isel(time=idx).values
         t = torch.from_numpy(arr).float().unsqueeze(0)  # [1, H, W]
@@ -116,7 +120,7 @@ class CARRA2(Dataset):
 
 
 class CARRA2Forecast(CARRA2):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, standardize: bool = False):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, standardize: bool = False, lead_months: int = 1):
         """
         A forecasting variant of CARRA2: each sample is a triplet of days one
         calendar *month* apart (k-1, k, k+1) -- e.g. 5 Sep, 5 Oct, 5 Nov --
@@ -132,8 +136,13 @@ class CARRA2Forecast(CARRA2):
         isn't, for an Apr-Sep melt season) simply has no match and is
         dropped, so a window can never silently splice together dates from
         two different blocks/years.
+
+        `lead_months` > 1 keeps only anchors whose k+1 ... k+lead_months all
+        exist, so get_rollout has a ground truth at every lead. __getitem__
+        still returns the one-month triplet.
         """
         super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim, standardize=standardize)
+        self.lead_months = lead_months
 
         times = self.da.time.values
         time_to_idx = {t: i for i, t in enumerate(times)}
@@ -141,24 +150,25 @@ class CARRA2Forecast(CARRA2):
         windows = []
         for i, t in enumerate(times):
             ts = pd.Timestamp(t)
-            km1_date = np.datetime64(ts - pd.DateOffset(months=1))
-            kp1_date = np.datetime64(ts + pd.DateOffset(months=1))
-            km1_i = time_to_idx.get(km1_date)
-            kp1_i = time_to_idx.get(kp1_date)
-            if km1_i is not None and kp1_i is not None:
+            km1_i = time_to_idx.get(np.datetime64(ts - pd.DateOffset(months=1)))
+            kp_i = [time_to_idx.get(np.datetime64(ts + pd.DateOffset(months=l))) for l in range(1, lead_months + 1)]
+            if km1_i is not None and None not in kp_i:
                 # month of k+1 as an integer 0-11 (Jan=0 ... Dec=11)
-                windows.append((km1_i, i, kp1_i, pd.Timestamp(kp1_date).month - 1))
-        self._windows = np.array(windows, dtype=np.int64).reshape(-1, 4)
+                kp1_month = (ts + pd.DateOffset(months=1)).month - 1
+                windows.append((km1_i, i, *kp_i, kp1_month))
+        # Each row: (k-1, k, k+1, ..., k+lead_months, month of k+1)
+        self._windows = np.array(windows, dtype=np.int64).reshape(-1, lead_months + 3)
 
     def __len__(self):
         return len(self._windows)
 
     def get_month(self, idx) -> int:
         """Return the month (0-11, Jan=0) of the k+1 (target) date of sample `idx`."""
-        return int(self._windows[idx][3])
+        return int(self._windows[idx][-1])
 
     def __getitem__(self, idx):
-        km1_i, k_i, kp1_i, month = self._windows[idx]
+        km1_i, k_i, kp1_i = self._windows[idx][:3]
+        month = self._windows[idx][-1]
         km1 = super().__getitem__(km1_i)
         k = super().__getitem__(k_i)
         kp1 = super().__getitem__(kp1_i)
@@ -166,11 +176,22 @@ class CARRA2Forecast(CARRA2):
         # context = (k+1, k, k-1); month = month of k+1 (0-11), fed to the UNet
         return context, torch.tensor(month, dtype=torch.long, device=self.device)
 
-    def get_dates(self, idx) -> tuple[np.datetime64, np.datetime64, np.datetime64]:
-        """Return the (target, k, k-1) calendar dates backing sample `idx`, matching __getitem__'s (kp1, context=[k, km1]) layout."""
-        km1_i, k_i, kp1_i, _ = self._windows[idx]
+    def get_rollout(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (context [2, H, W] = (k, k-1), targets [lead_months, H, W] = (k+1, ..., k+lead_months))
+        for sample `idx`, scaled as in __getitem__. Always without the batch dim."""
+        km1_i, k_i, *kp_i = self._windows[idx][:-1]
+        context = torch.cat([CARRA2.__getitem__(self, k_i), CARRA2.__getitem__(self, km1_i)], dim=-3)
+        targets = torch.cat([CARRA2.__getitem__(self, i) for i in kp_i], dim=-3)
+        if self.batch_dim:
+            context, targets = context[0], targets[0]
+        return context, targets
+
+    def get_dates(self, idx) -> tuple[np.datetime64, ...]:
+        """Return the (k+1, ..., k+lead_months, k, k-1) calendar dates backing sample `idx`. For
+        lead_months=1 that is (target, k, k-1), matching __getitem__'s (kp1, context=[k, km1]) layout."""
+        km1_i, k_i, *kp_i = self._windows[idx][:-1]
         times = self.da.time.values
-        return times[kp1_i], times[k_i], times[km1_i]
+        return (*(times[i] for i in kp_i), times[k_i], times[km1_i])
 
 
 class FashionMNIST(Dataset):

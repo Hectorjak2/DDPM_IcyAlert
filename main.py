@@ -1,7 +1,9 @@
 import torch
 from utils import CARRA2, FashionMNIST, CARRA2Forecast, download_carra2_monthly_data
 from utils.device_utils import get_device, device_diagnostics
-from utils.helper_functions import download_samples, dump_config_snapshot, schedule_summary, download_conditional_samples, download_unet_samples, analysis_sampling
+from utils.helper_functions import dump_config_snapshot, schedule_summary
+from utils.sampling import download_samples, analysis_sampling, forecast, forecast_dataset, DDPMForecaster, UnetForecaster
+from pathlib import Path
 
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
@@ -103,8 +105,11 @@ def run_ddpm(dataset: DatasetChoice,
             analysis_sampling(ddpm, model, test_ds, train_config, train_config.number_of_samples)
         else: 
             if train_config.forecasting_slice: 
-                test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False)
-                download_conditional_samples(ddpm, model, test_ds, train_config, train_config.number_of_samples)
+                # Disable dropout for inference. Left in train mode the residual blocks inject
+                # noise at every one of the T reverse steps, which wrecks the sample.
+                model.eval()
+                forecast(DDPMForecaster(ddpm, model), forecast_dataset(train_config), [0], train_config.number_of_samples,
+                         train_config.sample_seed, Path(train_config.output_dir) / train_config.experiment_name / "samples.pkl")
             else: 
                 download_samples(ddpm, model, train_config, train_config.number_of_samples) 
 
@@ -178,9 +183,10 @@ def run_unet(dataset: DatasetChoice,
 
     if sampling: 
         print("Sampling the model...")
-        test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False, standardize=True)
-        test_ds.mean, test_ds.std = train_ds.mean, train_ds.std  # the model was trained on these
-        download_unet_samples(model, test_ds, train_config.number_of_samples, train_config)
+        model.eval()
+        # The forecaster standardizes with the training statistics the model was trained on.
+        forecast(UnetForecaster(model, train_ds.mean, train_ds.std), forecast_dataset(train_config), [0], train_config.number_of_samples,
+                 train_config.sample_seed, Path(train_config.output_dir) / train_config.experiment_name / "samples.pkl")
 
     print("SCRIPT DONE ")
     return model

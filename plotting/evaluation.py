@@ -1,10 +1,11 @@
 """Thesis figures for conditional DDPM samples.
 
 Reads ``results/<run>/samples.pkl`` written by
-``utils.helper_functions.download_conditional_samples`` and writes four PDFs next to it:
+``utils.sampling.forecast`` (``--lead L`` for a rollout) and writes four PDFs next to it:
 
 1. ``sampling_loss``  -- MSE against the target per reverse step, averaged over samples.
-2. ``calibration``    -- mean predicted SIC per 0.01 target-SIC bin (over/under-prediction).
+2. ``calibration``    -- mean predicted SIC per 0.01 target-SIC bin (over/under-prediction),
+   one panel per lead time (2x3 for a six-month rollout), always next to the pickle.
 3. ``forecast_row``   -- k-1, k, k+1 (truth) and prediction for one sample.
 4. ``forecast_grid``  -- truth (top) vs prediction (bottom) for four samples.
 5. ``forecast_rows_melt`` / ``forecast_rows_cool`` -- four forecast rows each, one per
@@ -42,6 +43,7 @@ SIC_CMAP.set_bad("lightgray")
 
 N_BINS = 100  # 0.01-wide target-SIC bins for the calibration plot
 MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration curves
+MAX_CALIBRATION_COLS = 3  # lead-time panels per row in the calibration grid
 
 # Target (k+1) months per season, in seasonal order. Same split as MELT_SEASON /
 # COOL_SEASON in config.py.
@@ -70,12 +72,15 @@ def _as_data_range(field: torch.Tensor) -> torch.Tensor:
     return field
 
 
-def load_samples(path: str | Path):
+def load_leads(path: str | Path):
     """Load a samples.pkl, given its path or the run's results directory/name.
 
-    Returns ``(run_dir, data)`` where every field in ``data`` is a numpy [H, W] array
-    in data range [0, 1] with land as NaN, and ``sampling_losses`` is an [N, steps]
-    array (or None for pickles written before the running loss existed).
+    Returns ``(run_dir, leads)`` with one ``data`` dict per lead time, lead 1 first (a
+    single entry for a one-month forecast). Every field in ``data`` is a numpy [H, W]
+    array in data range [0, 1] with land as NaN, and ``sampling_losses`` is an [N, steps]
+    array (or None for pickles written before the running loss existed, or by
+    utils.sampling.forecast). In the dict for lead L, ``predictions`` and ``targets`` are
+    k+L and ``times`` holds (k+L, k, k-1), so everything downstream reads as for lead 1.
     """
     path = Path(path)
     if path.suffix != ".pkl":
@@ -84,24 +89,36 @@ def load_samples(path: str | Path):
     with open(path, "rb") as f:
         payload = pickle.load(f)
     samples, contexts, targets, times = payload[:4]
-    losses = payload[4] if len(payload) > 4 else None
-
-    data = {
-        "predictions": [s.squeeze().numpy() for s in samples],
-        "targets": [_as_data_range(t).squeeze().numpy() for t in targets],
-        # contexts are [2, H, W] = (k, k-1)
-        "k": [_as_data_range(c)[0].numpy() for c in contexts],
-        "km1": [_as_data_range(c)[1].numpy() for c in contexts],
-        "times": times,  # (k+1, k, k-1) dates
-        "sampling_losses": None,
-    }
+    # The 5th entry is the sampling losses in older pickles and member_seeds (ints) from forecast().
+    losses = payload[4] if len(payload) > 4 and payload[4] and not isinstance(payload[4][0], int) else None
     # An intermediate version stored only the last sample's curve (a flat list of floats).
     if losses:
         if not isinstance(losses[0], (list, tuple)):
             losses = [losses]
-        data["sampling_losses"] = np.asarray(losses, dtype=np.float64)
+        losses = np.asarray(losses, dtype=np.float64)
 
-    return path.parent, data
+    # samples are [1, lead_months, H, W] (older pickles [1, 1, H, W]), targets [lead_months, H, W]
+    samples = [s.reshape(-1, *s.shape[-2:]) for s in samples]
+    targets = [_as_data_range(t).reshape(-1, *t.shape[-2:]) for t in targets]
+    # contexts are [2, H, W] = (k, k-1)
+    contexts = [_as_data_range(c) for c in contexts]
+
+    leads = [{
+        "predictions": [s[lead].numpy() for s in samples],
+        "targets": [t[lead].numpy() for t in targets],
+        "k": [c[0].numpy() for c in contexts],
+        "km1": [c[1].numpy() for c in contexts],
+        "times": [(d[lead], d[-2], d[-1]) for d in times],  # (k+lead, k, k-1) dates
+        "sampling_losses": losses,
+    } for lead in range(targets[0].shape[0])]
+
+    return path.parent, leads
+
+
+def load_samples(path: str | Path, lead: int = 1):
+    """``(run_dir, data)`` for one lead time; see load_leads."""
+    run_dir, leads = load_leads(path)
+    return run_dir, leads[lead - 1]
 
 
 def _clean_image_axis(ax):
@@ -139,13 +156,11 @@ def plot_sampling_loss(data, out_dir):
     plt.close(fig)
 
 
-def plot_calibration(data, out_dir):
+def calibration_stats(data):
     """Prediction per target-SIC bin, pooled over all water pixels of all samples.
 
-    Shows mean, median and interquartile range rather than mean +- std: within a bin the
-    predictions are bimodal (a misplaced ice edge gives ~0 or ~1 where the target is
-    intermediate), so the std sits near its 0/1-mixture maximum in every bin and says
-    little, while the quartiles show the split.
+    Returns (centers, counts, filled, (mean, q25, median, q75)), the statistics only over
+    the bins in ``filled``.
     """
     target = np.concatenate([t.ravel() for t in data["targets"]]).astype(np.float64)
     pred = np.concatenate([p.ravel() for p in data["predictions"]]).astype(np.float64)
@@ -169,27 +184,70 @@ def plot_calibration(data, out_dir):
     # the count panel below shows that the bridged bins are (near-)empty. Bins with only a
     # handful of pixels are bridged too: their quantiles are noise and draw spurious kinks.
     filled = counts >= MIN_BIN_PIXELS
-    mean, q25, median, q75 = stats[filled].T
+    return centers, counts, filled, stats[filled].T
 
-    fig, (ax, ax_n) = plt.subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]})
-    ax.plot([0, 1], [0, 1], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE,
-            label="perfect")
-    ax.fill_between(centers[filled], q25, q75, color=COLORS[0], alpha=0.25, linewidth=0,
-                    label="interquartile range")
-    ax.plot(centers[filled], mean, color=COLORS[0], label="mean")
-    ax.plot(centers[filled], median, color=COLORS[2], linewidth=1.0, label="median")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("predicted SIC")
-    # Above the axes: inside, the band and curves leave no free corner.
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2)
 
-    ax_n.bar(centers, counts, width=1 / N_BINS, color=COLORS[3], linewidth=0)
-    ax_n.set_yscale("log")
-    ax_n.set_ylabel("pixels")
-    ax_n.set_xlabel("target SIC")
+def plot_calibration(leads, out_dir):
+    """Calibration per lead time: for each lead, the prediction per target-SIC bin over a
+    bar chart of the pixels per bin. One panel per lead, at most MAX_CALIBRATION_COLS per
+    row (1x1 for a one-month forecast, 2x3 for a six-month rollout), titled with the lead.
 
-    savefig(fig, out_dir, "calibration", width=TEXTWIDTH_IN / 2, height=3.4)
+    Shows mean, median and interquartile range rather than mean +- std: within a bin the
+    predictions are bimodal (a misplaced ice edge gives ~0 or ~1 where the target is
+    intermediate), so the std sits near its 0/1-mixture maximum in every bin and says
+    little, while the quartiles show the split.
+    """
+    n = len(leads)
+    cols = min(n, MAX_CALIBRATION_COLS)
+    rows = -(-n // cols)
+
+    fig = plt.figure()
+    # A legend row on top: inside the panels, the band and curves leave no free corner.
+    gs = fig.add_gridspec(1 + rows, cols, height_ratios=[0.5 if cols == 1 else 0.3] + [4] * rows)
+    first = first_n = None
+    for i, data in enumerate(leads):
+        r, c = divmod(i, cols)
+        centers, counts, filled, (mean, q25, median, q75) = calibration_stats(data)
+
+        # Nested, so tight_layout spaces the leads apart but keeps each count panel under its curves.
+        panel = gs[1 + r, c].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.15)
+        ax = fig.add_subplot(panel[0], sharex=first, sharey=first)
+        ax_n = fig.add_subplot(panel[1], sharex=ax, sharey=first_n)
+        first, first_n = first or ax, first_n or ax_n
+
+        ax.plot([0, 1], [0, 1], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE,
+                label="perfect")
+        ax.fill_between(centers[filled], q25, q75, color=COLORS[0], alpha=0.25, linewidth=0,
+                        label="interquartile range")
+        ax.plot(centers[filled], mean, color=COLORS[0], label="mean")
+        ax.plot(centers[filled], median, color=COLORS[2], linewidth=1.0, label="median")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.tick_params(labelbottom=False)
+        if n > 1:
+            ax.set_title(f"Lead: {i + 1}")
+
+        ax_n.bar(centers, counts, width=1 / N_BINS, color=COLORS[3], linewidth=0)
+        ax_n.set_yscale("log")
+        if c == 0:
+            ax.set_ylabel("predicted SIC")
+            ax_n.set_ylabel("pixels")
+        else:
+            ax.tick_params(labelleft=False)
+            ax_n.tick_params(labelleft=False)
+        # x axis labelled only on the lowest panel of each column
+        if i + cols >= n:
+            ax_n.set_xlabel("target SIC")
+        else:
+            ax_n.tick_params(labelbottom=False)
+
+    ax_legend = fig.add_subplot(gs[0, :])
+    ax_legend.axis("off")
+    ax_legend.legend(*first.get_legend_handles_labels(), loc="center", ncol=2 if cols == 1 else 4)
+
+    width = TEXTWIDTH_IN / 2 if cols == 1 else TEXTWIDTH_IN
+    height = 3.4 if cols == 1 else 0.4 + 2.6 * rows
+    savefig(fig, out_dir, "calibration", width=width, height=height)
     plt.close(fig)
 
 
@@ -339,16 +397,11 @@ def _water_mse(pred, target) -> float:
     return float(sq_err[np.isfinite(sq_err)].mean())
 
 
-def print_stats(data):
-    """Per-sample MSE over water, averaged over all samples and per season, next to the
-    persistence (forecast k+1 = k) and climatology (mean of the k+1 calendar month over
-    the training years) baselines, and the share of water pixels whose squared error
-    exceeds ERROR_THRESHOLD (the red pixels in ice_edge_error)."""
-    climatology = Climatology.for_shape(data["targets"][0].shape)
-    if climatology is None:
-        print("No climatology fitted for this grid -- run `python -m models.climatology` "
-              "and copy its .npy next to the data to add the climatology column.")
-
+def sample_errors(data, climatology) -> pd.DataFrame:
+    """One row per sample: its season (of the target month), the MSE over water of the
+    forecast, of persistence (forecast = k) and of climatology (mean of the target's
+    calendar month over the training years; NaN without a climatology), and the share of
+    water pixels whose squared error exceeds ERROR_THRESHOLD."""
     rows = []
     for pred, target, k, dates in zip(data["predictions"], data["targets"], data["k"],
                                       data["times"]):
@@ -363,7 +416,24 @@ def print_stats(data):
                             if climatology is not None else np.nan),
             "large": float((sq_err[water] > ERROR_THRESHOLD).mean()),
         })
-    df = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
+
+
+def _load_climatology(shape):
+    climatology = Climatology.for_shape(shape)
+    if climatology is None:
+        print("No climatology fitted for this grid -- run `python -m models.climatology` "
+              "and copy its .npy next to the data to add the climatology baseline.")
+    return climatology
+
+
+def print_stats(data):
+    """Per-sample MSE over water, averaged over all samples and per season, next to the
+    persistence (forecast k+1 = k) and climatology (mean of the k+1 calendar month over
+    the training years) baselines, and the share of water pixels whose squared error
+    exceeds ERROR_THRESHOLD (the red pixels in ice_edge_error)."""
+    climatology = _load_climatology(data["targets"][0].shape)
+    df = sample_errors(data, climatology)
 
     header = (f"{'':<6} {'n':>4} {'MSE (mean ± std)':>20} {'persistence MSE':>16} "
               f"{'climatology MSE':>16} {f'SE > {ERROR_THRESHOLD}':>10}")
@@ -380,13 +450,46 @@ def print_stats(data):
     print()
 
 
-def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None):
-    out_dir, data = load_samples(path)
+def plot_mse_by_lead(leads, out_dir):
+    """MSE over water against lead time, averaged over all samples, with the persistence and
+    climatology baselines. Each point is the mean of the per-sample MSE, as in print_stats's
+    "all" row."""
+    climatology = _load_climatology(leads[0]["targets"][0].shape)
+    lead_times = np.arange(1, len(leads) + 1)
+    errors = [sample_errors(data, climatology) for data in leads]
+    series = [("mse", "model", COLORS[0], "o"), ("persistence", "persistence", COLORS[2], "s")]
+    if climatology is not None:
+        series.append(("climatology", "climatology", COLORS[3], "^"))
+
+    fig, ax = plt.subplots()
+    for column, label, color, marker in series:
+        ax.plot(lead_times, [df[column].mean() for df in errors], color=color, marker=marker,
+                markersize=3.5, linewidth=1.0, label=label)
+    ax.set_xticks(lead_times)
+    ax.set_xlabel("lead time (months)")
+    ax.set_ylabel("MSE over water")
+    ax.set_ylim(bottom=0)
+    # Above the axes, so it never covers a point.
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(series))
+
+    savefig(fig, out_dir, "mse_by_lead", width=TEXTWIDTH_IN / 2, height=2.6)
+    plt.close(fig)
+
+
+def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None, lead: int = 1):
+    run_dir, leads = load_leads(path)
+    data = leads[lead - 1]
+    out_dir = run_dir
+    if lead > 1:
+        out_dir = out_dir / f"lead{lead}"
+        out_dir.mkdir(exist_ok=True)
     print_stats(data)
     plot_sampling_loss(data, out_dir)
-    plot_calibration(data, out_dir)
-    plot_forecast_row(data, out_dir, index=row_index)
-    plot_forecast_grid(data, out_dir, indices=grid_indices)
+    # Every lead in one figure, so it does not depend on --lead and goes next to the pickle.
+    plot_calibration(leads, run_dir)
+    plot_mse_by_lead(leads, run_dir)
+    #plot_forecast_row(data, out_dir, index=row_index)
+    #plot_forecast_grid(data, out_dir, indices=grid_indices)
     for season in SEASONS:
         indices = season_indices(data, season)
         if indices:
@@ -410,6 +513,8 @@ if __name__ == "__main__":
     parser.add_argument("--edge-indices", type=int, nargs=2, default=None,
                         metavar=("COOL", "MELT"),
                         help="samples shown in ice_edge_error (default: first Mar and Sep)")
+    parser.add_argument("--lead", type=int, default=1,
+                        help="for a rollout, score the forecast of k+lead (figures go to lead<lead>/)")
     args = parser.parse_args()
     make_all(args.run, row_index=args.row_index, grid_indices=args.grid_indices,
-             edge_indices=args.edge_indices)
+             edge_indices=args.edge_indices, lead=args.lead)
