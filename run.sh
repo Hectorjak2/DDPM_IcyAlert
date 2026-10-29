@@ -1,7 +1,7 @@
 #!/bin/sh
 
 ### General options gpua40
-#BSUB -q gpua40
+#BSUB -q gpuv100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
