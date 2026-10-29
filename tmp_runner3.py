@@ -7,12 +7,8 @@ SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results")
 unet_conf = UnetConfig()
 
 train_conf = TrainConfig()
-train_conf.experiment_name = "unet-residual"
-train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
-
-ddpm_conf = DDPMConfig()
-ddpm_conf.analysis_sampling = True
-ddpm_conf.schedule = "cosine"
+train_conf.experiment_name = "unet-ens-samples"
+train_conf.output_dir = f"results"
 
 model = run_unet(
             dataset=train_conf.dataset,
@@ -24,5 +20,6 @@ model = run_unet(
             sampling=train_conf.sampling,
             train_config=train_conf,
             unet_config=unet_conf,
-            train=True
+            train=False,
+            load_weights="ensembles/member_0/final_weights.pth",
         )
