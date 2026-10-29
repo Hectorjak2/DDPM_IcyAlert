@@ -7,8 +7,8 @@ SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results")
 unet_conf = UnetConfig()
 
 train_conf = TrainConfig()
-train_conf.experiment_name = "unet-rollout-m0"
-train_conf.output_dir = f"results"
+train_conf.experiment_name = "unet-rollout-m0v2"
+train_conf.output_dir = f"{SAMPLINGROOT}"
 train_conf.lead_months = 6
 
 
