@@ -23,5 +23,5 @@ model = run_unet(
             train_config=train_conf,
             unet_config=unet_conf,
             train=False,
-            load_weights="ensembles/member_0/final_weights.pth",
+            load_weights="results/ensembles/member_0/final_weights.pth",
         )

@@ -174,7 +174,7 @@ def run_unet(dataset: DatasetChoice,
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
-        model.load_weights(path=f"{train_config.output_dir}/{load_weights}", device=device)
+        model.load_weights(path=f"{load_weights}", device=device)
 
     if train: 
         print("Training the model...")
