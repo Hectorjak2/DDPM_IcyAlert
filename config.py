@@ -45,9 +45,11 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 94
+    cosine_shift_res: int = 70
 
     analysis_sampling: bool = False
+    residual_std: float = 1.0  # spread of the k+1 − k residual (model units) over TRAINING_SLICE; 1.0 = unscaled (pre-change checkpoints)
+
 
 TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")
@@ -69,7 +71,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-rescropped-shif94"
+    experiment_name: str = f"{training_type}-rescropped-shif70"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
