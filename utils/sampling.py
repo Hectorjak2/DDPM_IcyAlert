@@ -7,12 +7,14 @@ know which model it drives, and a prediction can be fed straight back in as the 
 (rollout). A single forecast is an ensemble of one member, and a one-month forecast is a
 rollout of length one, so forecast() covers single runs, ensembles and multi-month leads.
 
-forecast() writes (samples, contexts, targets, times, member_seeds), all in SIC [0, 1], land NaN:
+forecast() writes (samples, contexts, targets, times, member_seeds, sampling_losses), all in SIC [0, 1], land NaN:
     samples[i]  [n_members, lead_months, H, W]
     targets[i]  [lead_months, H, W]    = (k+1, ..., k+lead_months)
     contexts[i] [2, H, W]              = (k, k-1)
     times[i]    (k+1, ..., k+lead_months, k, k-1) dates
-With lead_months=1 this is the ensemble_samples.pkl layout plotting/ensemble_evaluation.py reads.
+    sampling_losses[i]  MSE against k+1 after every reverse step, for the first member at lead 1
+                        (the DDPM only; sampling_losses is None for the UNet)
+With lead_months=1 the first five are the ensemble_samples.pkl layout plotting/ensemble_evaluation.py reads.
 """
 import pickle
 import random
@@ -33,6 +35,9 @@ device = get_device()
 class Forecaster:
     """Forecast of k+1 from (k, k-1). Subclasses set encode/decode to their model's range."""
 
+    # Running loss of the last predict() given a target; only the DDPM has one.
+    sampling_loss: list[float] | None = None
+
     def encode(self, sic: torch.Tensor) -> torch.Tensor:
         """SIC [0, 1] -> the model's range. Land stays NaN."""
         raise NotImplementedError
@@ -41,8 +46,9 @@ class Forecaster:
         """The model's range -> SIC [0, 1]."""
         raise NotImplementedError
 
-    def predict(self, context: torch.Tensor, month: int, member: int) -> torch.Tensor:
-        """context [2, H, W] = (k, k-1) in SIC, month (0-11) of k+1 -> [1, H, W] SIC, land NaN."""
+    def predict(self, context: torch.Tensor, month: int, member: int, target: torch.Tensor | None = None) -> torch.Tensor:
+        """context [2, H, W] = (k, k-1) in SIC, month (0-11) of k+1 -> [1, H, W] SIC, land NaN.
+        target [1, H, W] (k+1 in SIC) is only for diagnostics, see sampling_loss."""
         raise NotImplementedError
 
 
@@ -64,7 +70,7 @@ class UnetForecaster(Forecaster):
     def decode(self, x):
         return x * self.std + self.mean
 
-    def predict(self, context, month, member):
+    def predict(self, context, month, member, target=None):
         model = self.models[member] if isinstance(self.models, dict) else self.models
         # Same input as training: NaN -> 0 (= the training mean), plus the land mask channel.
         x = torch.cat([self.encode(context).nan_to_num(0.0).unsqueeze(0),
@@ -91,9 +97,14 @@ class DDPMForecaster(Forecaster):
     def decode(self, x):
         return to_data_range(x) #(x + 1.0) / 2.0
 
-    def predict(self, context, month, member):
+    def predict(self, context, month, member, target=None):
         # ddpm.sample already returns SIC [0, 1] with land NaN.
-        return self.ddpm.sample(context=self.encode(context), month=month, model=self.model)[0]
+        if target is None:
+            return self.ddpm.sample(context=self.encode(context), month=month, model=self.model)[0]
+        # With a target, sample also returns the MSE against it after every reverse step. It draws
+        # no random numbers, so the sample is the same as without a target.
+        pred, self.sampling_loss = self.ddpm.sample(context=self.encode(context), month=month, model=self.model, target=target)
+        return pred[0]
 
 
 def build_unet(in_channels: int, weights: str, unet_cfg: UnetConfig, land_mask: torch.Tensor = None) -> SimpleUnet:
@@ -175,13 +186,15 @@ def draw_dates(test_ds, n_dates: int, sample_seed: int) -> list[int]:
     return [date_rng.randrange(len(test_ds)) for _ in range(n_dates)]
 
 
-def rollout(forecaster: Forecaster, context: torch.Tensor, month: int, member: int, lead_months: int) -> torch.Tensor:
+def rollout(forecaster: Forecaster, context: torch.Tensor, month: int, member: int, lead_months: int,
+            target: torch.Tensor | None = None) -> torch.Tensor:
     """Autoregressive forecast of k+1, ..., k+lead_months from context (k, k-1), month of k+1.
-    Each prediction becomes day k of the next step. Returns [lead_months, H, W] SIC, land NaN."""
+    Each prediction becomes day k of the next step. Returns [lead_months, H, W] SIC, land NaN.
+    target [1, H, W] (k+1) is passed on to the lead-1 step only, for its sampling loss."""
     window = context
     preds = []
     for lead in range(lead_months):
-        pred = forecaster.predict(window, (month + lead) % 12, member)
+        pred = forecaster.predict(window, (month + lead) % 12, member, target if lead == 0 else None)
         preds.append(pred)
         window = torch.cat([pred, window[:1]], dim=0)
     return torch.cat(preds, dim=0)
@@ -200,6 +213,7 @@ def forecast(forecaster: Forecaster, test_ds: CARRA2Forecast, member_seeds: list
     contexts = []
     targets = []
     times = []
+    sampling_losses = []
     for idx in tqdm(draw_dates(test_ds, n_dates, sample_seed)):
         context, target = test_ds.get_rollout(idx)  # (k, k-1), (k+1, ..., k+lead_months)
         context, target = test_ds.to_sic(context), test_ds.to_sic(target)
@@ -207,18 +221,23 @@ def forecast(forecaster: Forecaster, test_ds: CARRA2Forecast, member_seeds: list
         times.append(test_ds.get_dates(idx))
 
         members = []
-        for seed in member_seeds:
+        forecaster.sampling_loss = None
+        for i, seed in enumerate(member_seeds):
             # One seed per trajectory, not per step: member m's whole rollout is reproducible on
             # its own and distinct from the others, and its first lead equals a lead_months=1 run.
             torch.manual_seed(seed)
-            members.append(rollout(forecaster, context, month, seed, test_ds.lead_months).cpu())
+            # The running sampling loss is recorded for the first member at lead 1 only.
+            members.append(rollout(forecaster, context, month, seed, test_ds.lead_months,
+                                   target[:1] if i == 0 else None).cpu())
 
         samples.append(torch.stack(members))  # [n_members, lead_months, H, W]
         targets.append(target.cpu())
         contexts.append(context.cpu())
+        sampling_losses.append(forecaster.sampling_loss)
 
         # dump the samples after each date, an ensemble date is expensive
-        pickle.dump((samples, contexts, targets, times, member_seeds), open(out_path, "wb"))
+        losses = sampling_losses if forecaster.sampling_loss is not None else None
+        pickle.dump((samples, contexts, targets, times, member_seeds, losses), open(out_path, "wb"))
 
     print(f"Wrote {len(samples)} dates x {len(member_seeds)} members x {test_ds.lead_months} leads to {out_path}")
 

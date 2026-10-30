@@ -10,7 +10,7 @@ Three ways of getting a spread of forecasts for each test date:
   Lakshminarayanan et al. 2017). Each member is one deterministic forecast, dropout off.
 
 All write {TrainConfig.samples_dir}/{experiment_name}/ensemble_samples.pkl through utils.sampling.forecast, as
-(samples, contexts, targets, times, member_seeds) with each entry of samples [n_members, lead_months, H, W].
+(samples, contexts, targets, times, member_seeds, sampling_losses) with each entry of samples [n_members, lead_months, H, W].
 Dates are drawn with TrainConfig.sample_seed, so they match the single-forecast runs with the same lead_months.
 """
 import argparse

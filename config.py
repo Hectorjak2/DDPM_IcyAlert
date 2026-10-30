@@ -33,8 +33,8 @@ class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 200
-    schedule: str = "shifted_cosine"
+    timesteps: int = 1000
+    schedule: str = "cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -46,7 +46,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 70
+    cosine_shift_res: int = 20
 
     analysis_sampling: bool = False
     residual_std: float = 1.0  # spread of the k+1 − k residual (model units) over TRAINING_SLICE; 1.0 = unscaled (pre-change checkpoints)
@@ -72,11 +72,11 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-local"
+    experiment_name: str = f"{training_type}-new-objective"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 50
+    number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True

@@ -325,22 +325,23 @@ class ConditionalDDPM(DDPM):
         # Replace NaNs so they don't propagate through the conv layers and
         # contaminate the predictions at valid pixels
         x0 = torch.nan_to_num(x0, nan=0.0) #k+1, k, k-1
-        residual = (x0[:,0] - x0[:,1])
+        x0_residual = (x0[:,0] - x0[:,1])
 
         # Sample x_t using the forward diffusion process, keeping the noise target
-        noise = torch.randn_like(residual.unsqueeze(1))
-        xt = self.q_sample(residual.unsqueeze(1), t, noise) #Only taking k+1
+        noise = torch.randn_like(x0_residual.unsqueeze(1))
+        xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only taking k+1
 
         #reconstructing the input to be [xt, k, k-1]
         input_X = torch.cat([xt, x0[:,1:]], dim=1)
 
         # Predict the noise using the model
-        predicted_noise = model(self.model_input(input_X), t, month)
+        predicted_x0_residual = model(self.model_input(input_X), t, month)
 
         # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];
         # expand it to the batch size since boolean-mask indexing needs an exact shape
         # match, not just a broadcastable one.
-        se = (predicted_noise - noise) ** 2
+        se = (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
+        #se = (predicted_x0_residual - noise) ** 2
         loss = se[self.water_mask.expand_as(se)].mean()
 
         return loss
@@ -370,13 +371,13 @@ class ConditionalDDPM(DDPM):
         variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
 
         # Recover x_0 from the predicted noise and clamp it to the data range
-        predicted_noise = model(self.model_input(x), t, month)
+        predicted_x0_residual = model(self.model_input(x), t, month)
         k = x[:, 1:2] if base is None else base
-        x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
-        x0_pred = torch.clamp(x0_pred, -1.0 - k, 1.0 - k)
+        #x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
+        predicted_x0_residual = torch.clamp(predicted_x0_residual, -1.0 - k, 1.0 - k)
 
         # Posterior mean of q(x_{t-1} | x_t, x_0), plus noise
-        mean = coef_x0 * x0_pred + coef_xt * x[:,0].unsqueeze(1)
+        mean = coef_x0 * predicted_x0_residual + coef_xt * x[:,0].unsqueeze(1)
         xt = mean + torch.sqrt(variance_t) * z
 
         return xt

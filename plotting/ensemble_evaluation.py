@@ -68,7 +68,8 @@ def load_ensemble(path: str | Path, lead: int = 1):
         path = (path if path.exists() else Path("results") / path) / "ensemble_samples.pkl"
 
     with open(path, "rb") as f:
-        samples, contexts, targets, times, member_seeds = pickle.load(f)
+        # forecast() also stores the sampling losses as a 6th entry; not used here.
+        samples, contexts, targets, times, member_seeds = pickle.load(f)[:5]
 
     data = {
         "members": [s[:, lead - 1].numpy() for s in samples],  # samples are [M, lead_months, H, W]

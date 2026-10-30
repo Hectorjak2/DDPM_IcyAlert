@@ -89,8 +89,12 @@ def load_leads(path: str | Path):
     with open(path, "rb") as f:
         payload = pickle.load(f)
     samples, contexts, targets, times = payload[:4]
-    # The 5th entry is the sampling losses in older pickles and member_seeds (ints) from forecast().
-    losses = payload[4] if len(payload) > 4 and payload[4] and not isinstance(payload[4][0], int) else None
+    # forecast() writes (..., member_seeds, sampling_losses); older pickles had the sampling
+    # losses 5th, and an in-between version member_seeds (ints) 5th with no losses at all.
+    if len(payload) > 5:
+        losses = payload[5]
+    else:
+        losses = payload[4] if len(payload) > 4 and payload[4] and not isinstance(payload[4][0], int) else None
     # An intermediate version stored only the last sample's curve (a flat list of floats).
     if losses:
         if not isinstance(losses[0], (list, tuple)):
