@@ -5,16 +5,25 @@ Reads ``results/<run>/ensemble_samples.pkl`` written by ``ensemble.py`` and writ
 pooled over all dates. A calibrated ensemble gives a flat histogram at 1/(M+1); a U shape means
 too little spread, a dome too much, a slope a bias.
 
-Two panels:
-1. all water pixels;
-2. the marginal ice zone, pixels with 0 < SIC < 1 on day k. Selected on day k, not on the
-   target: conditioning on the observation biases the histogram (the forecaster's dilemma).
+Only pixels in the marginal ice zone enter, 0 < SIC < 1 on day k. Open water and pack ice
+(SIC exactly 0 or 1) are left out: there the truth ties with (nearly) every member, the
+random tie-breaking spreads them evenly over the ranks, and since they are most of the
+ocean they flatten the histogram whatever the ensemble does at the ice. The zone is
+selected on day k, not on the target: conditioning on the observation biases the histogram
+(the forecaster's dilemma).
 
-Ties (open water at 0, pack ice at 1) are broken at random, as in Hamill (2001); counting only
+Ties that remain inside the zone are broken at random, as in Hamill (2001); counting only
 members strictly below the truth would pile every tie into rank 0 and fake a U shape.
 
-Also prints the spread-skill pair per subset and season: mean ensemble spread next to the RMSE
-of the ensemble mean, which should be about equal for a calibrated ensemble.
+Also prints the spread-skill pair per season: mean ensemble spread next to the RMSE of the
+ensemble mean, which should be about equal for a calibrated ensemble.
+
+``spread_skill_map.pdf`` shows the same pair per pixel, one row per season: spread and RMSE
+over the season's dates on a shared colour scale, and their ratio (log scale, 1 =
+calibrated). Over all ocean pixels, as the map itself shows where the ice is; the ratio is
+left out where the spread is below MIN_MAP_SPREAD (open water, pack ice). Spread and RMSE
+lining up says the ensemble knows *where* it is uncertain, the ratio whether it knows *how
+much*. The per-pixel correlation of spread and RMSE is printed alongside.
 
 Run from the repo root:  python -m plotting.ensemble_evaluation <run_name | path/to/ensemble_samples.pkl> [--lead L]
 """
@@ -25,12 +34,26 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import ListedColormap, LogNorm
 
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MUTED, REF_LINESTYLE
-from plotting.evaluation import SEASONS, _as_data_range
+from plotting.evaluation import SEASONS, _as_data_range, _clean_image_axis
 
-SUBSETS = {"water": "all water", "miz": r"marginal ice zone (day $k$)"}
 TIE_SEED = 0  # fixes the random tie-breaking, so the figure is reproducible
+
+# Spread-skill maps. Below this spread (open water, pack ice) spread and RMSE are both ~0 and
+# their ratio is noise, so the ratio map leaves those pixels out.
+MIN_MAP_SPREAD = 0.01
+RATIO_LIMIT = 4  # ratio colour scale runs from 1/RATIO_LIMIT to RATIO_LIMIT, log, centred at 1
+LAND_COLOR = "lightgray"  # as SIC_CMAP in plotting.evaluation
+
+SPREAD_CMAP = plt.cm.viridis.copy()
+SPREAD_CMAP.set_bad(LAND_COLOR)
+RATIO_CMAP = plt.cm.RdBu_r.copy()
+RATIO_CMAP.set_bad(alpha=0)  # transparent, so the background layer shows land vs masked ocean
+# Background of the ratio map: masked ocean white, land grey.
+BACKGROUND_CMAP = ListedColormap(["white"])
+BACKGROUND_CMAP.set_bad(LAND_COLOR)
 
 
 def load_ensemble(path: str | Path, lead: int = 1):
@@ -57,12 +80,9 @@ def load_ensemble(path: str | Path, lead: int = 1):
     return path.parent, data
 
 
-def subset_mask(target: np.ndarray, k: np.ndarray, subset: str) -> np.ndarray:
-    """[H, W] pixels that enter the histogram: water, and for 'miz' 0 < SIC(k) < 1."""
-    water = np.isfinite(target)
-    if subset == "miz":
-        return water & (k > 0) & (k < 1)
-    return water
+def miz_mask(target: np.ndarray, k: np.ndarray) -> np.ndarray:
+    """[H, W] pixels that enter the histogram: water with 0 < SIC(k) < 1."""
+    return np.isfinite(target) & (k > 0) & (k < 1)
 
 
 def ranks(members: np.ndarray, target: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -82,27 +102,26 @@ def season_of(date) -> str:
 
 
 def rank_statistics(data):
-    """Per subset and season ('all', 'cool', 'melt'): rank counts [M+1] and the sums for
-    spread-skill. Accumulated one date at a time, so a WEST ensemble fits in memory."""
+    """Per season ('all', 'cool', 'melt'): rank counts [M+1] and the sums for spread-skill,
+    over the marginal ice zone. Accumulated one date at a time, so a WEST ensemble fits in
+    memory."""
     n_members = data["members"][0].shape[0]
     rng = np.random.default_rng(TIE_SEED)
     stats = {
-        (subset, season): {"counts": np.zeros(n_members + 1, dtype=np.int64), "var": 0.0, "se": 0.0, "n": 0}
-        for subset in SUBSETS for season in ("all", *SEASONS)
+        season: {"counts": np.zeros(n_members + 1, dtype=np.int64), "var": 0.0, "se": 0.0, "n": 0}
+        for season in ("all", *SEASONS)
     }
 
     for members, target, k, dates in zip(data["members"], data["targets"], data["k"], data["times"]):
-        season = season_of(dates[0])
-        for subset in SUBSETS:
-            mask = subset_mask(target, k, subset)
-            m, y = members[:, mask].astype(np.float64), target[mask].astype(np.float64)
-            r = ranks(m, y, rng)
-            for key in ((subset, "all"), (subset, season)):
-                s = stats[key]
-                s["counts"] += np.bincount(r, minlength=n_members + 1)
-                s["var"] += m.var(axis=0, ddof=1).sum()
-                s["se"] += ((m.mean(axis=0) - y) ** 2).sum()
-                s["n"] += y.size
+        mask = miz_mask(target, k)
+        m, y = members[:, mask].astype(np.float64), target[mask].astype(np.float64)
+        r = ranks(m, y, rng)
+        for season in ("all", season_of(dates[0])):
+            s = stats[season]
+            s["counts"] += np.bincount(r, minlength=n_members + 1)
+            s["var"] += m.var(axis=0, ddof=1).sum()
+            s["se"] += ((m.mean(axis=0) - y) ** 2).sum()
+            s["n"] += y.size
     return n_members, stats
 
 
@@ -110,42 +129,131 @@ def print_spread_skill(n_members, stats):
     """Spread (sqrt of the mean member variance) vs RMSE of the ensemble mean. For a calibrated
     ensemble RMSE ~ sqrt((M+1)/M) * spread, so the ratio should be about 1."""
     factor = np.sqrt((n_members + 1) / n_members)
-    header = f"{'subset':<8} {'season':<6} {'pixels':>10} {'spread':>9} {'RMSE':>9} {'RMSE/spread*':>13}"
-    print(f"\nSpread-skill, {n_members} members (* divided by sqrt((M+1)/M) = {factor:.3f}; 1 = calibrated)")
+    header = f"{'season':<6} {'pixels':>10} {'spread':>9} {'RMSE':>9} {'RMSE/spread*':>13}"
+    print(f"\nSpread-skill over the marginal ice zone, {n_members} members "
+          f"(* divided by sqrt((M+1)/M) = {factor:.3f}; 1 = calibrated)")
     print(header)
     print("-" * len(header))
-    for (subset, season), s in stats.items():
+    for season, s in stats.items():
         if not s["n"]:
             continue
         spread = np.sqrt(s["var"] / s["n"])
         rmse = np.sqrt(s["se"] / s["n"])
-        print(f"{subset:<8} {season:<6} {s['n']:>10} {spread:>9.4f} {rmse:>9.4f} {rmse / spread / factor:>13.2f}")
+        print(f"{season:<6} {s['n']:>10} {spread:>9.4f} {rmse:>9.4f} {rmse / spread / factor:>13.2f}")
     print()
 
 
 def plot_rank_histogram(n_members, stats, out_dir, name):
-    """Relative frequency per rank, one panel per subset; bars for all dates, outlines per season."""
+    """Relative frequency per rank over the marginal ice zone; bars for all dates, outlines
+    per season."""
     edges = np.arange(n_members + 2) - 0.5
     flat = 1 / (n_members + 1)
 
-    fig, axes = plt.subplots(1, len(SUBSETS), sharey=True)
-    for ax, (subset, title) in zip(axes, SUBSETS.items()):
-        counts = stats[(subset, "all")]["counts"]
-        ax.bar(np.arange(n_members + 1), counts / counts.sum(), width=1.0, color=COLORS[0],
-               alpha=0.6, linewidth=0, label="all dates")
-        for season, color in zip(SEASONS, COLORS[1:]):
-            c = stats[(subset, season)]["counts"]
-            if c.sum():
-                ax.stairs(c / c.sum(), edges, color=color, linewidth=1.2, label=f"{season} season")
-        ax.axhline(flat, color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE, label="flat")
-        ax.set_title(title)
-        ax.set_xlabel("rank of truth among members")
-        ax.set_xticks(range(0, n_members + 1, 2))
-        ax.set_xlim(edges[0], edges[-1])
-    axes[0].set_ylabel("relative frequency")
-    axes[0].legend()
+    fig, ax = plt.subplots()
+    counts = stats["all"]["counts"]
+    ax.bar(np.arange(n_members + 1), counts / counts.sum(), width=1.0, color=COLORS[0],
+           alpha=0.6, linewidth=0, label="all dates")
+    for season, color in zip(SEASONS, COLORS[1:]):
+        c = stats[season]["counts"]
+        if c.sum():
+            ax.stairs(c / c.sum(), edges, color=color, linewidth=1.2, label=f"{season} season")
+    ax.axhline(flat, color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE, label="flat")
+    ax.set_xlabel("rank of truth among members")
+    ax.set_ylabel("relative frequency")
+    ax.set_xticks(range(0, n_members + 1, 2))
+    ax.set_xlim(edges[0], edges[-1])
+    ax.legend()
 
-    savefig(fig, out_dir, name, width=TEXTWIDTH_IN, height=2.8)
+    savefig(fig, out_dir, name, width=TEXTWIDTH_IN / 2, height=2.8)
+    plt.close(fig)
+
+
+def spread_skill_maps(data):
+    """Per season ('cool', 'melt'): per-pixel spread, RMSE of the ensemble mean and their
+    ratio over the dates of that season, each [H, W] with land NaN.
+
+    Over all ocean pixels rather than the day-k marginal ice zone: the map itself shows where
+    the ice is, and a per-date mask would give each pixel a different number of dates. The
+    ratio is divided by sqrt((M+1)/M) as in print_spread_skill, so 1 = calibrated, and is NaN
+    where the spread is below MIN_MAP_SPREAD.
+    """
+    n_members = data["members"][0].shape[0]
+    shape = data["targets"][0].shape
+    sums = {season: {"var": np.zeros(shape), "se": np.zeros(shape), "n": np.zeros(shape)}
+            for season in SEASONS}
+
+    for members, target, dates in zip(data["members"], data["targets"], data["times"]):
+        s = sums[season_of(dates[0])]
+        m = members.astype(np.float64)
+        water = np.isfinite(target)
+        s["var"][water] += m.var(axis=0, ddof=1)[water]
+        s["se"][water] += ((m.mean(axis=0) - target) ** 2)[water]
+        s["n"] += water
+
+    factor = np.sqrt((n_members + 1) / n_members)
+    maps = {}
+    for season, s in sums.items():
+        if not s["n"].any():
+            continue
+        with np.errstate(invalid="ignore", divide="ignore"):  # land: 0 / 0
+            spread = np.sqrt(s["var"] / s["n"])
+            rmse = np.sqrt(s["se"] / s["n"])
+            ratio = np.where(spread >= MIN_MAP_SPREAD, rmse / spread / factor, np.nan)
+        maps[season] = {"spread": spread, "rmse": rmse, "ratio": ratio}
+    return maps
+
+
+def print_map_correlation(maps):
+    """Pearson correlation of per-pixel spread and RMSE, over pixels with spread >=
+    MIN_MAP_SPREAD: does the ensemble know where it is uncertain? The open ocean, where both
+    are ~0, is left out, as it would inflate the correlation."""
+    print(f"Per-pixel spread vs RMSE correlation (pixels with spread >= {MIN_MAP_SPREAD})")
+    for season, m in maps.items():
+        keep = m["spread"] >= MIN_MAP_SPREAD
+        r = np.corrcoef(m["spread"][keep], m["rmse"][keep])[0, 1]
+        print(f"{season:<6} {keep.sum():>9} pixels  r = {r:.2f}")
+    print()
+
+
+def plot_spread_skill_map(maps, out_dir, name):
+    """One row per season: spread and RMSE on a shared colour scale, and their ratio
+    (red: RMSE > spread, overconfident; blue: underconfident; white: spread < MIN_MAP_SPREAD)."""
+    # Shared scale, so equal colours are equal SIC errors in both maps and both seasons.
+    vmax = np.nanpercentile(np.concatenate([m[k].ravel() for m in maps.values()
+                                            for k in ("spread", "rmse")]), 99)
+    ratio_norm = LogNorm(1 / RATIO_LIMIT, RATIO_LIMIT)
+
+    n = len(maps)
+    fig = plt.figure()
+    # Colorbars horizontal below the maps: vertical ones between the columns would widen every
+    # gap, as tight_layout spaces all columns alike.
+    gs = fig.add_gridspec(n + 1, 3, height_ratios=[1] * n + [0.05])
+    titles = ("spread", "RMSE", r"RMSE / spread$^*$")
+    for row, (season, m) in enumerate(maps.items()):
+        axes = [fig.add_subplot(gs[row, col]) for col in range(3)]
+        img = axes[0].imshow(m["spread"], cmap=SPREAD_CMAP, vmin=0, vmax=vmax, origin="lower",
+                             interpolation="none")
+        axes[1].imshow(m["rmse"], cmap=SPREAD_CMAP, vmin=0, vmax=vmax, origin="lower",
+                       interpolation="none")
+        axes[2].imshow(np.where(np.isfinite(m["spread"]), 0.0, np.nan), cmap=BACKGROUND_CMAP,
+                       origin="lower", interpolation="none")
+        img_ratio = axes[2].imshow(m["ratio"], cmap=RATIO_CMAP, norm=ratio_norm, origin="lower",
+                                   interpolation="none")
+        for ax, title in zip(axes, titles):
+            _clean_image_axis(ax)
+            if row == 0:
+                ax.set_title(title)
+        axes[0].set_ylabel(f"{season} season")
+
+    fig.colorbar(img, cax=fig.add_subplot(gs[n, :2]), orientation="horizontal",
+                 extend="max").set_label("SIC")
+    cbar = fig.colorbar(img_ratio, cax=fig.add_subplot(gs[n, 2]), orientation="horizontal",
+                        extend="both")
+    cbar.set_ticks([1 / 4, 1 / 2, 1, 2, 4], labels=["1/4", "1/2", "1", "2", "4"])
+    cbar.minorticks_off()
+    cbar.set_label("ratio")
+
+    savefig(fig, out_dir, name, width=TEXTWIDTH_IN, height=1.9 * n + 0.7)
     plt.close(fig)
 
 
@@ -157,7 +265,10 @@ def make_all(path, out_dir: str | None = None, lead: int = 1):
     n_members, stats = rank_statistics(data)
     print_spread_skill(n_members, stats)
     plot_rank_histogram(n_members, stats, out_dir, "rank_histogram")
-    print(f"Wrote {out_dir}/rank_histogram.pdf")
+    maps = spread_skill_maps(data)
+    print_map_correlation(maps)
+    plot_spread_skill_map(maps, out_dir, "spread_skill_map")
+    print(f"Wrote {out_dir}/rank_histogram.pdf and spread_skill_map.pdf")
 
 
 if __name__ == "__main__":

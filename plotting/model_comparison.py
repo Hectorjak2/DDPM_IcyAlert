@@ -5,10 +5,10 @@ Reads two ``samples.pkl`` (as ``plotting.evaluation``) and writes to ``--out``:
 1. ``calibration`` -- mean and interquartile range of the prediction per 0.01 target-SIC
    bin for both models, one panel per lead time (2x3 for a six-month rollout).
 2. ``mse_by_lead`` -- MSE over water against lead time for both models, with the
-   persistence and climatology baselines.
+   climatology baseline.
 
 Both sets should be sampled on the same dates (same ``TrainConfig.sample_seed``); the
-baselines are computed from the first set, and a warning is printed if the dates differ.
+baseline is computed from the first set, and a warning is printed if the dates differ.
 Only the lead times both sets have are plotted.
 
 Per-model figures stay in ``plotting.evaluation``.
@@ -41,7 +41,7 @@ def _check_dates(models):
     dates_b = [d[0] for d in leads_b[0]["times"]]
     if dates_a != dates_b:
         print(f"Warning: {name_a} and {name_b} were sampled on different dates "
-              f"({len(dates_a)} vs {len(dates_b)} samples) -- the baselines follow {name_a}.")
+              f"({len(dates_a)} vs {len(dates_b)} samples) -- the baseline follows {name_a}.")
 
 
 def plot_calibration(models, out_dir):
@@ -101,21 +101,20 @@ def plot_calibration(models, out_dir):
 
 
 def plot_mse_by_lead(models, out_dir):
-    """MSE over water against lead time for both models, with the persistence and
-    climatology baselines (from the first set). Each point is the mean of the per-sample
-    MSE, as in ``plotting.evaluation.plot_mse_by_lead``."""
+    """MSE over water against lead time for both models, with the climatology baseline
+    (from the first set). Each point is the mean of the per-sample MSE, as in
+    ``plotting.evaluation.plot_mse_by_lead``."""
     reference = models[0][1]
     climatology = _load_climatology(reference[0]["targets"][0].shape)
     lead_times = np.arange(1, len(reference) + 1)
 
     series = []  # (label, per-lead MSE, color, marker)
     for (name, leads), (color, marker) in zip(models, MODEL_STYLES):
-        # The baselines are not needed per model, so no climatology here.
+        # The baseline is not needed per model, so no climatology here.
         series.append((name, [sample_errors(d, None).mse.mean() for d in leads], color, marker))
-    baselines = [sample_errors(d, climatology) for d in reference]
-    series.append(("persistence", [df.persistence.mean() for df in baselines], COLORS[2], "s"))
     if climatology is not None:
-        series.append(("climatology", [df.climatology.mean() for df in baselines], COLORS[3], "^"))
+        baseline = [sample_errors(d, climatology).climatology.mean() for d in reference]
+        series.append(("climatology", baseline, COLORS[3], "^"))
 
     fig, ax = plt.subplots()
     for label, mse, color, marker in series:
@@ -125,11 +124,10 @@ def plot_mse_by_lead(models, out_dir):
     ax.set_xlabel("lead time (months)")
     ax.set_ylabel("MSE over water")
     ax.set_ylim(bottom=0)
-    # Above the axes, so it never covers a point; two rows, as four entries do not fit
-    # across half the text width.
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2)
+    # Above the axes, so it never covers a point.
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(series))
 
-    savefig(fig, out_dir, "mse_by_lead", width=TEXTWIDTH_IN / 2, height=2.9)
+    savefig(fig, out_dir, "mse_by_lead", width=TEXTWIDTH_IN / 2, height=2.6)
     plt.close(fig)
 
 
