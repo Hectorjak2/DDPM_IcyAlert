@@ -33,7 +33,7 @@ class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 1000
+    timesteps: int = 200
     schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
@@ -72,11 +72,11 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-rescropped-shif70"
+    experiment_name: str = f"{training_type}-local"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 20
+    number_of_samples: int = 50
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
@@ -95,5 +95,5 @@ class EnsembleConfig:
     method: str = "ddpm" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
     weights: str = "results/ddpm-rescropped-shif70/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
-    n_members: int = 5
-    experiment_name: str = f"ensemble-{method}_70shif"
+    n_members: int = 10
+    experiment_name: str = f"{method}-ensemble-50sam"
