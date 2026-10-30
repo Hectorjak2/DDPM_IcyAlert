@@ -9,7 +9,7 @@ Three ways of getting a spread of forecasts for each test date:
 - deep: n_members residual UNets trained by train_ensemble, each from its own seed (deep ensemble,
   Lakshminarayanan et al. 2017). Each member is one deterministic forecast, dropout off.
 
-All write {output_dir}/{experiment_name}/ensemble_samples.pkl through utils.sampling.forecast, as
+All write {TrainConfig.samples_dir}/{experiment_name}/ensemble_samples.pkl through utils.sampling.forecast, as
 (samples, contexts, targets, times, member_seeds) with each entry of samples [n_members, lead_months, H, W].
 Dates are drawn with TrainConfig.sample_seed, so they match the single-forecast runs with the same lead_months.
 """
@@ -17,6 +17,7 @@ import argparse
 from pathlib import Path
 
 from utils.sampling import forecast, forecast_dataset, dropout_forecaster, ddpm_forecaster, deep_forecaster
+from utils.helper_functions import dump_ensemble_snapshot
 from config import UnetConfig, DDPMConfig, TrainConfig, EnsembleConfig
 from main import run_unet
 import os
@@ -101,8 +102,9 @@ def sample_ensemble(ens_cfg: EnsembleConfig, train_cfg: TrainConfig, unet_cfg: U
     else:
         raise ValueError(f"unknown ensemble method {ens_cfg.method!r}; expected 'dropout', 'ddpm' or 'deep'")
 
+    dump_ensemble_snapshot(ens_cfg, train_cfg, unet_cfg, ddpm_cfg, getattr(forecaster, "ddpm", None))
     forecast(forecaster, test_ds, member_seeds, train_cfg.number_of_samples, train_cfg.sample_seed,
-             Path(train_cfg.output_dir) / ens_cfg.experiment_name / "ensemble_samples.pkl")
+             Path(train_cfg.samples_dir) / ens_cfg.experiment_name / "ensemble_samples.pkl")
 
 
 if __name__ == "__main__":
@@ -112,5 +114,5 @@ if __name__ == "__main__":
                         help="train this ensemble member; default is the first one not trained or running")
     args = parser.parse_args()
 
-    train_ensemble(args.seed)
-    #sample_ensemble(EnsembleConfig(), TrainConfig(), UnetConfig(), DDPMConfig())
+    #train_ensemble(args.seed)
+    sample_ensemble(EnsembleConfig(), TrainConfig(), UnetConfig(), DDPMConfig())

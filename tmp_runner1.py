@@ -1,8 +1,5 @@
 from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
 from main import run_ddpm, run_unet
-import os 
-
-SAMPLINGROOT = os.environ.get("TEMP_RESULT_STORAGE", "results/samples")
 
 unet_conf = UnetConfig()
 train_conf = TrainConfig()
@@ -11,7 +8,6 @@ ddpm_conf.schedule = "shifted_cosine"
 ddpm_conf.analysis_sampling = True
 
 train_conf.experiment_name = "ddpm-residual-shifted-analys"
-train_conf.output_dir = f"{SAMPLINGROOT}/{train_conf.experiment_name}"
 
 model, ddpm, train_ds = run_ddpm(
             dataset=TrainConfig.dataset,

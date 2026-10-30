@@ -229,14 +229,14 @@ def download_samples(ddpm: DDPM, model, train_cfg: TrainConfig, n_of_samples: in
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
-    Path(f"results/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
+    Path(f"{train_cfg.samples_dir}/{train_cfg.experiment_name}").mkdir(parents=True, exist_ok=True)
     samples = []
     for i in tqdm(range(n_of_samples)):
         sample = ddpm.sample(model)
         samples.append(sample.cpu())
 
         #dump the samples after each iteration
-        pickle.dump(samples, open(f"results/{train_cfg.experiment_name}/{train_cfg.experiment_name}_samples.pkl", "wb"))
+        pickle.dump(samples, open(f"{train_cfg.samples_dir}/{train_cfg.experiment_name}/{train_cfg.experiment_name}_samples.pkl", "wb"))
 
 
 def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainConfig, n_of_samples: int = 10):
@@ -247,7 +247,7 @@ def analysis_sampling(ddpm: ConditionalDDPM, model, test_ds, train_cfg: TrainCon
     # Disable dropout for inference. Left in train mode the residual blocks inject
     # noise at every one of the T reverse steps, which wrecks the sample.
     model.eval()
-    outdir = f"{train_cfg.output_dir}/{train_cfg.experiment_name}"
+    outdir = f"{train_cfg.samples_dir}/{train_cfg.experiment_name}"
 
     Path(outdir).mkdir(parents=True, exist_ok=True)
 

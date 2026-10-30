@@ -109,7 +109,7 @@ def run_ddpm(dataset: DatasetChoice,
                 # noise at every one of the T reverse steps, which wrecks the sample.
                 model.eval()
                 forecast(DDPMForecaster(ddpm, model), forecast_dataset(train_config), [0], train_config.number_of_samples,
-                         train_config.sample_seed, Path(train_config.output_dir) / train_config.experiment_name / "samples.pkl")
+                         train_config.sample_seed, Path(train_config.samples_dir) / train_config.experiment_name / "samples.pkl")
             else: 
                 download_samples(ddpm, model, train_config, train_config.number_of_samples) 
 
@@ -186,7 +186,7 @@ def run_unet(dataset: DatasetChoice,
         model.eval()
         # The forecaster standardizes with the training statistics the model was trained on.
         forecast(UnetForecaster(model, train_ds.mean, train_ds.std), forecast_dataset(train_config), [0], train_config.number_of_samples,
-                 train_config.sample_seed, Path(train_config.output_dir) / train_config.experiment_name / "samples.pkl")
+                 train_config.sample_seed, Path(train_config.samples_dir) / train_config.experiment_name / "samples.pkl")
 
     print("SCRIPT DONE ")
     return model

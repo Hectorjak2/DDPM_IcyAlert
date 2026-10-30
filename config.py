@@ -9,6 +9,7 @@ When you want to change a hyperparameter, edit it here, then update main.py's __
 block to use it.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Tuple
 
@@ -80,8 +81,11 @@ class TrainConfig:
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
 
-    #Saving samples setting 
-    output_dir: str = f"results"
+    #Saving settings
+    output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
+    # Samples (samples.pkl, ensemble_samples.pkl, loss_stats.pkl): {samples_dir}/{experiment_name}/.
+    # Separate from output_dir because samples are large; run.sh points TEMP_RESULT_STORAGE at /work3 on HPC.
+    samples_dir: str = os.environ.get("TEMP_RESULT_STORAGE", "results")
 
 @dataclass
 class EnsembleConfig:
@@ -91,5 +95,5 @@ class EnsembleConfig:
     method: str = "deep" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
     weights: str = "results/unet-residual/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
-    n_members: int = 10
-    experiment_name: str = f"ensemble-{method}_tester"
+    n_members: int = 4
+    experiment_name: str = f"ensemble-{method}_4members"
