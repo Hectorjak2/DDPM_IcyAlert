@@ -329,7 +329,7 @@ class ConditionalDDPM(DDPM):
 
         # Sample x_t using the forward diffusion process, keeping the noise target
         noise = torch.randn_like(x0_residual.unsqueeze(1))
-        xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only taking k+1
+        xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only noising the residual
 
         #reconstructing the input to be [xt, k, k-1]
         input_X = torch.cat([xt, x0[:,1:]], dim=1)
