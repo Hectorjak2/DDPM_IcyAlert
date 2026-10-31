@@ -1,10 +1,10 @@
 #!/bin/bash	
 
 #SBATCH --cpus-per-task=1
-#SBATCH --time=12:00
+#SBATCH --time=24:00
 #SBATCH --mem=16gb
 #SBATCH --gres=gpu
-#SBATCH --nodelist=comp-gpu13
+#SBATCH --nodelist=comp-gpu04
 #SBATCH --mail-user=s234822@dtu.dk
 #SBATCH --mail-type=END,FAIL
 #SBATCH --partition=titans
