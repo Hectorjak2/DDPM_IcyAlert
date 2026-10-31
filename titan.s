@@ -4,7 +4,7 @@
 #SBATCH --time=24:00
 #SBATCH --mem=16gb
 #SBATCH --gres=gpu
-#SBATCH --nodelist=comp-gpu04
+#SBATCH --nodelist=comp-gpu13
 #SBATCH --mail-user=s234822@dtu.dk
 #SBATCH --mail-type=END,FAIL
 #SBATCH --partition=titans
@@ -29,7 +29,10 @@ fi
 export CARRA2_DATA_ROOT=/scratch/s234822/CARRA2_DAILY
 
 source ~/.bashrc
-source .venv/bin/activate
+## ~/.bashrc often skips conda init in non-interactive jobs, so load conda explicitly
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate icyalert
+python --version
 python -m main
 
 echo "Done: $(date +%F-%R:%S)"
