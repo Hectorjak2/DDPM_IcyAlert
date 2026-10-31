@@ -52,9 +52,9 @@ class DDPMConfig:
     residual_std: float = 1.0  # spread of the k+1 − k residual (model units) over TRAINING_SLICE; 1.0 = unscaled (pre-change checkpoints)
 
 
-TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
+TRAINING_SLICE = slice("2000-01-01", "2019-10-31")#slice("2000-01-01", "2004-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")
-SMOKE_TEST_SLICE = slice("2000-01-01", "2000-12-31")
+SMOKE_TEST_SLICE = slice("2005-01-01", "2006-12-31")
 MELT_SEASON = [slice(f"{year}-04-01", f"{year}-09-30") for year in range(2020, 2025)]
 COOL_SEASON = [slice(f"{year}-10-01", f"{year + 1}-03-31") for year in range(2020, 2024)]
 
@@ -72,7 +72,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-new-objectivEe"
+    experiment_name: str = f"{training_type}-objective"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -80,6 +80,8 @@ class TrainConfig:
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
+    training: bool = True 
+    weights: str = None#"ddpm-local-new/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

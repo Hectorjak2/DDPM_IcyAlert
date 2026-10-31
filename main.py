@@ -201,6 +201,8 @@ if __name__ == "__main__":
             lr=TrainConfig.lr,
             experiment_name=TrainConfig.experiment_name,
             sampling=TrainConfig.sampling,
+            train=TrainConfig.training,
+            load_weights=TrainConfig.weights,
             train_config=TrainConfig(),
             unet_config=UnetConfig()
         )
@@ -215,6 +217,8 @@ if __name__ == "__main__":
             lr=TrainConfig.lr,
             experiment_name=TrainConfig.experiment_name,
             sampling=TrainConfig.sampling, 
+            train=TrainConfig.training,
+            load_weights=TrainConfig.weights,
             ddpm_config=DDPMConfig(),
             train_config=TrainConfig(),
             unet_config=UnetConfig()
