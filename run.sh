@@ -1,12 +1,12 @@
 #!/bin/sh
 
 ### General options ,gpua40, gpuv100, gpul40s, gpua100
-#BSUB -q gpul40s
+#BSUB -q gpuv100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 16:00
 #BSUB -R "rusage[mem=16GB]"
-###BSUB -R "select[gpu80gb]"
+#BSUB -R "select[gpu32gb]"
 
 #BSUB -u hectorheltj@gmail.com
 #BSUB -B
