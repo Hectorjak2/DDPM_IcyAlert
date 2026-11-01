@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from config import TRAINING_SLICE
+from config import TrainConfig
 from models.models import DatasetChoice
 from utils.dataloader import CARRA2, CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
 
@@ -28,7 +28,7 @@ class Climatology:
         self.means = means  # [12, H, W] in data range [0, 1], Jan first, land NaN
 
     @classmethod
-    def fit(cls, area: DatasetChoice = DatasetChoice.CARRA_WEST, time_slice: slice = TRAINING_SLICE):
+    def fit(cls, area: DatasetChoice = DatasetChoice.CARRA_WEST, time_slice: slice = TrainConfig().training_slice):
         da = CARRA2("siconc", "cpu", time_slice=time_slice, area=area).da
         # One month at a time, so only one month's mean is held in memory at once.
         means = []

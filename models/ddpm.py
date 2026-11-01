@@ -307,9 +307,11 @@ class DDPM:
         model.save_weights(f"{train_config.output_dir}/{experiment_name}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
-    def __init__(self, *args, forecast_period: slice, **kwargs):
+    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, **kwargs):
         super().__init__(*args, **kwargs)
         self.forecast_period = forecast_period
+        self.batch_size = batch_size
+        self.unfolded = unfolded
 
     def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor): 
         """
@@ -325,29 +327,44 @@ class ConditionalDDPM(DDPM):
         # Replace NaNs so they don't propagate through the conv layers and
         # contaminate the predictions at valid pixels
         x0 = torch.nan_to_num(x0, nan=0.0) #k+1, k, k-1
-        x0_residual = (x0[:,0] - x0[:,1])
+        x0_residual = (x0[:,0] - x0[:,1]) #k+1 - k residual 
+        x_k_residual = (x0[:,1] - x0[:,2]) #k -k-1 residual
 
         # Sample x_t using the forward diffusion process, keeping the noise target
         noise = torch.randn_like(x0_residual.unsqueeze(1))
         xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only noising the residual
 
-        #reconstructing the input to be [xt, k, k-1]
-        input_X = torch.cat([xt, x0[:,1:]], dim=1)
+        #reconstructing the input to be [xt, k - (k-1)]
+        input_X = torch.cat([xt, x_k_residual.unsqueeze(1)], dim=1)
 
-        # Predict the noise using the model
+        k = x0[:, 1:2]
         predicted_x0_residual = model(self.model_input(input_X), t, month)
 
-        # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];
-        # expand it to the batch size since boolean-mask indexing needs an exact shape
-        # match, not just a broadcastable one.
-        se = (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
+        # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];        
+        if self.unfolded and (t > 0).all():
+            #Simulating one step of the chain: 
+            z = torch.randn_like(xt[:,0].unsqueeze(1))
+            coef_x0 = self.posterior_mean_coef_x0[t].view(-1, 1, 1, 1)
+            coef_xt = self.posterior_mean_coef_xt[t].view(-1, 1, 1, 1)
+            variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
+
+            mean = coef_x0 * torch.clamp(predicted_x0_residual, -1.0 - k, 1.0 - k) + coef_xt * xt
+            xtm1 = mean + torch.sqrt(variance_t) * z
+            
+            input_Xm1 = torch.cat([xtm1, x_k_residual.unsqueeze(1)], dim=1)
+            unfolded_x0_residual = model(self.model_input(input_Xm1), t-1, month)
+
+            se = 0.5 * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2 + 0.5 * (unfolded_x0_residual - x0_residual.unsqueeze(1)) ** 2
+        else: 
+            se = (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
+
         #se = (predicted_x0_residual - noise) ** 2
         loss = se[self.water_mask.expand_as(se)].mean()
 
         return loss
 
     @torch.no_grad()
-    def p_sample(self, model, x, t, month, base: Optional[torch.Tensor] = None):
+    def p_sample(self, model, x, t, month, base: torch.Tensor):
         """
         Reverse diffusion process: p(x_{t-1} | x_t)
 
@@ -357,9 +374,10 @@ class ConditionalDDPM(DDPM):
 
         Args:
             model: The U-Net model.
-            x: Current image tensor of shape [B, C, H, W].
+            x: [B, 2, H, W] = (x_t, k - (k-1)).
             t: Current timestep tensor of shape [B].
-            base: Field the residual is added to, [B, 1, H, W]. Defaults to day k (x[:, 1:2]).
+            base: Field the residual is added to (day k), [B, 1, H, W]. Required, since x
+                holds only the context residual, not k itself.
         """
         # No noise is added on the final step (t == 0), which is deterministic.
         z = torch.randn_like(x[:,0].unsqueeze(1)) if t[0] > 0 else torch.zeros_like(x[:,0].unsqueeze(1))
@@ -372,7 +390,7 @@ class ConditionalDDPM(DDPM):
 
         # Recover x_0 from the predicted noise and clamp it to the data range
         predicted_x0_residual = model(self.model_input(x), t, month)
-        k = x[:, 1:2] if base is None else base
+        k = base
         #x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
         predicted_x0_residual = torch.clamp(predicted_x0_residual, -1.0 - k, 1.0 - k)
 
@@ -405,13 +423,15 @@ class ConditionalDDPM(DDPM):
         # through the receptive field and compounds over every reverse step.
         context = torch.nan_to_num(context, nan=0.0).unsqueeze(0)  # -> [1, C, H, W]
         base = context[:, 0:1] if base is None else torch.nan_to_num(base, nan=0.0).unsqueeze(0)  # -> [1, 1, H, W]
+        residual_context = (context[:,0] - context[:,1]).unsqueeze(0)
+        
         xt = torch.randn((1, 1, height, width), device=self.device)
         month_tensor = torch.tensor([month], device=self.device).long()
         for t in reversed(range(self.timesteps)):
             t_tensor = torch.tensor([t], device=self.device).long()
-            # Re-assemble [xt, k, k-1] each step: the context channels stay fixed,
+            # Re-assemble [xt, k - (k-1)] each step: the context channel stays fixed,
             # but xt must be the latest denoised estimate, not the initial noise.
-            input_x = torch.cat([xt, context], dim=1)
+            input_x = torch.cat([xt, residual_context], dim=1)
             xt = self.p_sample(model, input_x, t_tensor, month_tensor, base)
 
             tmp_rec = xt + base #temporary reconstruction for loss

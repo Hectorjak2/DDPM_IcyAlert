@@ -8,7 +8,7 @@ from pathlib import Path
 from models.models import DatasetChoice
 from models.ddpm import DDPM, ConditionalDDPM
 from models.unet import SimpleUnet, train_network, count_parameters
-from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
+from config import UnetConfig, DDPMConfig, TrainConfig
 
 device = get_device()
 
@@ -42,7 +42,7 @@ def run_ddpm(dataset: DatasetChoice,
     #Defining the dataset and dataloader
     if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST, DatasetChoice.CARRA_CROPPED): 
         if forecast_period: 
-            train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=TRAINING_SLICE, batch_dim=False)
+            train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=train_config.training_slice, batch_dim=False)
         else: 
             train_ds = CARRA2("siconc", device, area=dataset, batch_dim=False)
 
@@ -60,7 +60,9 @@ def run_ddpm(dataset: DatasetChoice,
                 image_size=train_ds[0][0].shape[-1],
                 land_mask=train_ds.finite_mask,
                 schedule=ddpm_config.schedule,
-                forecast_period=forecast_period
+                forecast_period=forecast_period,
+                batch_size=train_config.batch_size,
+                unfolded=train_config.unfolded_loss,
             ) 
     else: 
         ddpm = DDPM(
@@ -75,7 +77,7 @@ def run_ddpm(dataset: DatasetChoice,
 
     # Build UNet from config (see config.py for the downsized CARRA2 config).
     model = SimpleUnet(
-        in_channels=4,
+        in_channels=3,
         out_channels=unet_config.out_channels,
         channels=unet_config.channels,
         time_emb_dim=unet_config.time_emb_dim,
@@ -99,7 +101,7 @@ def run_ddpm(dataset: DatasetChoice,
         
     if sampling: 
         print("Sampling the model...")
-        if ddpm_config.analysis_sampling: 
+        if train_config.analysis_sampling: 
             print("Analysis sampling")
             test_ds = CARRA2Forecast("siconc", device, area=train_config.dataset, time_slice=train_config.forecasting_slice, batch_dim=False)
             analysis_sampling(ddpm, model, test_ds, train_config, train_config.number_of_samples)
@@ -144,7 +146,7 @@ def run_unet(dataset: DatasetChoice,
 
     #Defining the dataset and dataloader
     if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST, DatasetChoice.CARRA_CROPPED): 
-        train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=TRAINING_SLICE, batch_dim=False, standardize=True)
+        train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=train_config.training_slice, batch_dim=False, standardize=True)
 
     dataloader = torch.utils.data.DataLoader(
         train_ds,

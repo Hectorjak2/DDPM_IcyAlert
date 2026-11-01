@@ -41,18 +41,18 @@ class DDPMConfig:
     beta_end: float = 0.02
 
     # Only used when schedule == "laplace". Hang et al.'s defaults.
-    laplace_mu: float = -2
+    laplace_mu: float = 0
     laplace_b: float = 0.5
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 20
+    cosine_shift_res: int = 140
 
-    analysis_sampling: bool = False
     residual_std: float = 1.0  # spread of the k+1 − k residual (model units) over TRAINING_SLICE; 1.0 = unscaled (pre-change checkpoints)
 
 
-TRAINING_SLICE = slice("2000-01-01", "2019-10-31")#slice("2000-01-01", "2004-10-31")
+TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
+SMOKE_TRAINING_SLICE = slice("2000-01-01", "2004-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")
 SMOKE_TEST_SLICE = slice("2005-01-01", "2006-12-31")
 MELT_SEASON = [slice(f"{year}-04-01", f"{year}-09-30") for year in range(2020, 2025)]
@@ -67,12 +67,17 @@ class TrainConfig:
     #DDPM or Unet
     training_type: str = "ddpm" #"unet", "ddpm"
 
-    #Forecasting settings: 
+    #DDPM specific
+    analysis_sampling: bool = False
+    unfolded_loss: bool = False
+
+    #Forecasting and training settings: 
+    training_slice: slice = TRAINING_SLICE
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-objective"
+    experiment_name: str = f"{training_type}-objective-cres"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -81,7 +86,7 @@ class TrainConfig:
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = True 
-    weights: str = None#"ddpm-local-new/final_weights.pth"
+    weights: str = None#"ddpm-local-old/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

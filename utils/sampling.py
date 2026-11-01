@@ -23,7 +23,7 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
+from config import UnetConfig, DDPMConfig, TrainConfig
 from models.ddpm import DDPM, ConditionalDDPM
 from models.unet import SimpleUnet
 from utils.dataloader import CARRA2Forecast, to_model_range, to_data_range
@@ -108,8 +108,8 @@ class DDPMForecaster(Forecaster):
 
 
 def build_unet(in_channels: int, weights: str, unet_cfg: UnetConfig, land_mask: torch.Tensor = None) -> SimpleUnet:
-    """SimpleUnet as built in main.py, with the weights in `weights` loaded. in_channels is 3 for the
-    UNet baseline (k, k-1, land mask) and 4 for the DDPM (x_t, k, k-1, land mask)."""
+    """SimpleUnet as built in main.py, with the weights in `weights` loaded. in_channels is 3 for both
+    the UNet baseline (k, k-1, land mask) and the DDPM (x_t, k - (k-1), land mask)."""
     model = SimpleUnet(
         in_channels=in_channels,
         out_channels=unet_cfg.out_channels,
@@ -135,7 +135,7 @@ def forecast_dataset(train_cfg: TrainConfig) -> CARRA2Forecast:
 
 def unet_training_set(train_cfg: TrainConfig) -> CARRA2Forecast:
     """The standardized training set, for the mean, std and land mask the residual UNet was trained with."""
-    return CARRA2Forecast("siconc", device, area=train_cfg.dataset, time_slice=TRAINING_SLICE, batch_dim=False, standardize=True)
+    return CARRA2Forecast("siconc", device, area=train_cfg.dataset, time_slice=TrainConfig().training_slice, batch_dim=False, standardize=True)
 
 
 def dropout_forecaster(weights: str, train_cfg: TrainConfig, unet_cfg: UnetConfig) -> UnetForecaster:
@@ -172,8 +172,10 @@ def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfi
         land_mask=test_ds.finite_mask,
         schedule=ddpm_cfg.schedule,
         forecast_period=train_cfg.forecasting_slice,
+        batch_size=train_cfg.batch_size,
+        unfolded=False,  # only affects the training loss
     )
-    model = build_unet(4, weights, unet_cfg)
+    model = build_unet(3, weights, unet_cfg)
     # Dropout off: here the spread comes from the reverse process, not the network.
     model.eval()
     return DDPMForecaster(ddpm, model)

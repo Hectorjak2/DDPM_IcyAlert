@@ -1,11 +1,11 @@
-from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
+from config import UnetConfig, DDPMConfig, TrainConfig
 from main import run_ddpm, run_unet
 
 unet_conf = UnetConfig()
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
 ddpm_conf.schedule = "shifted_cosine"
-ddpm_conf.analysis_sampling = True
+train_conf.analysis_sampling = True
 
 train_conf.experiment_name = "ddpm-residual-shifted-analys"
 

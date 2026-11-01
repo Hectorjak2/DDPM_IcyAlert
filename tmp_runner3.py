@@ -1,4 +1,4 @@
-from config import UnetConfig, DDPMConfig, TrainConfig, TRAINING_SLICE
+from config import UnetConfig, DDPMConfig, TrainConfig
 from main import run_ddpm, run_unet
 
 unet_conf = UnetConfig()
