@@ -4,23 +4,39 @@ from main import run_ddpm, run_unet
 unet_conf = UnetConfig()
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
-ddpm_conf.schedule = "shifted_cosine"
-train_conf.analysis_sampling = True
-
-train_conf.experiment_name = "ddpm-residual-shifted-analys"
+train_conf.experiment_name = "ddpm-dobuleC"
 
 model, ddpm, train_ds = run_ddpm(
-            dataset=TrainConfig.dataset,
-            forecast_period = TrainConfig.forecasting_slice,
-            timesteps=DDPMConfig.timesteps,
-            batch_size=TrainConfig.batch_size,
-            epochs=TrainConfig.epochs,
-            lr=TrainConfig.lr,
-            experiment_name=TrainConfig.experiment_name,
-            sampling=TrainConfig.sampling, 
+            dataset=train_conf.dataset,
+            forecast_period = train_conf.forecasting_slice,
+            timesteps=ddpm_conf.timesteps,
+            batch_size=train_conf.batch_size,
+            epochs=train_conf.epochs,
+            lr=train_conf.lr,
+            experiment_name=train_conf.experiment_name,
+            sampling=train_conf.sampling, 
+            train=train_conf.training,
+            load_weights=train_conf.weights,
             ddpm_config=ddpm_conf,
             train_config=train_conf,
-            unet_config=unet_conf,
-            train=False,
-            load_weights="ddpm-residual-shifted/final_weights.pth"
+            unet_config=unet_conf
+        )
+
+train_conf.experiment_name = "ddpm-dobuleC-shift"
+ddpm_conf.schedule = "shifted_cosine"
+
+model, ddpm, train_ds = run_ddpm(
+            dataset=train_conf.dataset,
+            forecast_period = train_conf.forecasting_slice,
+            timesteps=ddpm_conf.timesteps,
+            batch_size=train_conf.batch_size,
+            epochs=train_conf.epochs,
+            lr=train_conf.lr,
+            experiment_name=train_conf.experiment_name,
+            sampling=train_conf.sampling, 
+            train=train_conf.training,
+            load_weights=train_conf.weights,
+            ddpm_config=ddpm_conf,
+            train_config=train_conf,
+            unet_config=unet_conf
         )

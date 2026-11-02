@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 1600
+    cosine_shift_res: int = 1200
 
     # The residual std is not set here: it comes per (area, training slice) from
     # utils/residual_stats.json via CARRA2Forecast.residual_scale, and is written to config.txt.
