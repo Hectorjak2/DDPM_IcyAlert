@@ -70,6 +70,7 @@ class TrainConfig:
     #DDPM specific
     analysis_sampling: bool = False
     unfolded_loss: bool = False
+    dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
 
     #Forecasting and training settings: 
     training_slice: slice = TRAINING_SLICE

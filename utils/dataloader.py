@@ -1,4 +1,6 @@
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -8,6 +10,7 @@ import xarray as xr
 from torchvision import datasets, transforms
 from models.models import DatasetChoice
 import dask
+import dask.array as dsa
 
 allowed_variables = ["siconc"]
 CARRA_WEST_MASK = None
@@ -21,6 +24,16 @@ CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILY")
 CROPPED_Y = slice(220, 1116)
 CROPPED_X = slice(0, 896)
 
+# Residual statistics written by utils/residual_stats.py. Kept in the repo, not under
+# CARRA2_DATA_ROOT, so HPC gets the same numbers as local without copying data files.
+RESIDUAL_STATS_PATH = Path(__file__).with_name("residual_stats.json")
+
+
+def residual_stats_key(area: DatasetChoice, time_slice: slice | list[slice] | None) -> str:
+    """Cache key for one (area, time_slice) combination, e.g. 'CARRA_TEST|2000-01-01:2004-10-31'."""
+    slices = time_slice if isinstance(time_slice, list) else [time_slice]
+    return f"{area.value}|" + ",".join("all" if s is None else f"{s.start}:{s.stop}" for s in slices)
+
 
 def to_model_range(x: torch.Tensor) -> torch.Tensor:
     """Map data in [0, 1] to the [-1, 1] range the diffusion process assumes."""
@@ -32,7 +45,7 @@ def to_data_range(x: torch.Tensor) -> torch.Tensor:
     return (x + 1.0) / 2.0
 
 class CARRA2(Dataset):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, standardize: bool = False):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, ddpm: bool = True):
         """
         This class is a PyTorch Dataset for the CARRA2 dataset.
         It allows for loading a specific variable, selecting a time slice.
@@ -51,7 +64,7 @@ class CARRA2(Dataset):
         self.device = device
         self.name = f"CARRA2-{selected_variable}"  # Add this
         self.area = area
-        self.standardize = standardize  # Standardize to zero-mean unit-scale for the U-Net baseline. Otherwise keep the original model_to_range [-1,1] scaling
+        self.ddpm = ddpm  # Standardize to zero-mean unit-scale for the U-Net baseline. Otherwise keep the original model_to_range [-1,1] scaling
 
         if selected_variable not in allowed_variables:
             raise ValueError(f"{selected_variable} not in {allowed_variables}")
@@ -91,12 +104,11 @@ class CARRA2(Dataset):
             torch.from_numpy(np.isfinite(first)).float().unsqueeze(0).to(device)
         )
 
-        if self.standardize:
-            # Statistics over water (finite) pixels only; land is NaN and must not count.
-            water = self.da.where(np.isfinite(self.da))
-            self.mean, self.std = dask.compute(
-                water.mean(skipna=True), water.std(skipna=True)
-            )
+        # Statistics over water (finite) pixels only; land is NaN and must not count.
+        water = self.da.where(np.isfinite(self.da))
+        self.mean, self.std = dask.compute(
+            water.mean(skipna=True), water.std(skipna=True)
+        )
 
 
 
@@ -105,7 +117,7 @@ class CARRA2(Dataset):
 
     def to_sic(self, x: torch.Tensor) -> torch.Tensor:
         """Inverse of the scaling in __getitem__: back to SIC in [0, 1], land stays NaN."""
-        return x * float(self.std) + float(self.mean) if self.standardize else to_data_range(x)
+        return to_data_range(x) if self.ddpm else x * float(self.std) + float(self.mean)
 
     def __getitem__(self, idx):
         arr = self.da.isel(time=idx).values
@@ -113,14 +125,20 @@ class CARRA2(Dataset):
         # siconc is a fraction in [0, 1]; the diffusion process assumes roughly
         # zero-mean unit-scale data, so shift to [-1, 1]. NaN (land) stays NaN and
         # is handled by the loss mask.
-        t = to_model_range(t) if not self.standardize else (t - float(self.mean)) / float(self.std)
+        
+        if self.ddpm: #scaling for diffusion
+            t = to_model_range(t)
+        else: 
+            t = (t - float(self.mean)) / float(self.std)
+
         if self.batch_dim:
             t = t.unsqueeze(0)  # [1, 1, H, W]
+    
         return t.to(self.device)
 
 
 class CARRA2Forecast(CARRA2):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, standardize: bool = False, lead_months: int = 1):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, ddpm: bool = True, lead_months: int = 1):
         """
         A forecasting variant of CARRA2: each sample is a triplet of days one
         calendar *month* apart (k-1, k, k+1) -- e.g. 5 Sep, 5 Oct, 5 Nov --
@@ -141,7 +159,7 @@ class CARRA2Forecast(CARRA2):
         exist, so get_rollout has a ground truth at every lead. __getitem__
         still returns the one-month triplet.
         """
-        super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim, standardize=standardize)
+        super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim, ddpm=ddpm)
         self.lead_months = lead_months
 
         times = self.da.time.values
@@ -158,6 +176,36 @@ class CARRA2Forecast(CARRA2):
                 windows.append((km1_i, i, *kp_i, kp1_month))
         # Each row: (k-1, k, k+1, ..., k+lead_months, month of k+1)
         self._windows = np.array(windows, dtype=np.int64).reshape(-1, lead_months + 3)
+
+        # Scale of the one-month residual k+1 - k (SIC units), which ConditionalDDPM diffuses.
+        # Loaded from the cache written by utils/residual_stats.py, since computing it reads
+        # the whole slice. None if this (area, slice) was never computed, which is expected for
+        # test sets: the model must use the training set's values, never the test set's own.
+        stats = {}
+        if RESIDUAL_STATS_PATH.exists():
+            stats = json.loads(RESIDUAL_STATS_PATH.read_text()).get(residual_stats_key(area, time_slice), {})
+        self.residual_mean, self.residual_std = stats.get("mean"), stats.get("std")
+
+    def residual_stats(self, stride: int = 5) -> dict:
+        """
+        Mean and std of the residual k+1 - k in SIC units, pooled over every
+        `stride`-th window and all water pixels (land is NaN and skipped).
+
+        Neighbouring anchors are near-duplicates (1 Sep -> 1 Oct vs 2 Sep -> 2 Oct),
+        so striding through the whole slice is as precise as using every window, and
+        unlike a single year it covers every year in the slice. frac_zero is the
+        share of water pixels whose residual is exactly 0 (e.g. open water in both
+        months); a large value pulls the std down.
+        """
+        w = self._windows[::stride]
+        kp1 = self.da.isel(time=w[:, 2]).data
+        k = self.da.isel(time=w[:, 1]).data
+        r = kp1 - k  # dask arrays, so no time-coordinate alignment between the two
+        mean, std, n_water, n_zero = dask.compute(
+            dsa.nanmean(r), dsa.nanstd(r), dsa.isfinite(r).sum(), (r == 0).sum()
+        )
+        return {"mean": float(mean), "std": float(std), "frac_zero": float(n_zero / n_water),
+                "n_pairs": len(w)}
 
     def __len__(self):
         return len(self._windows)
@@ -192,7 +240,6 @@ class CARRA2Forecast(CARRA2):
         km1_i, k_i, *kp_i = self._windows[idx][:-1]
         times = self.da.time.values
         return (*(times[i] for i in kp_i), times[k_i], times[km1_i])
-
 
 class FashionMNIST(Dataset):
     def __init__(self, train: bool = True, device: str = "cpu", batch_dim: bool = True):

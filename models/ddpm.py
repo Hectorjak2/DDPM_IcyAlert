@@ -307,11 +307,12 @@ class DDPM:
         model.save_weights(f"{train_config.output_dir}/{experiment_name}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
-    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, **kwargs):
+    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, dose:int, **kwargs):
         super().__init__(*args, **kwargs)
         self.forecast_period = forecast_period
         self.batch_size = batch_size
         self.unfolded = unfolded
+        self.dose = dose
 
     def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor): 
         """
@@ -335,7 +336,11 @@ class ConditionalDDPM(DDPM):
         xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only noising the residual
 
         #reconstructing the input to be [xt, k - (k-1)]
-        input_X = torch.cat([xt, x_k_residual.unsqueeze(1)], dim=1)
+        if self.dose and torch.rand(()).item() < self.dose: 
+            xtr = torch.randn_like(xt)
+            input_X = torch.cat([xtr, x_k_residual.unsqueeze(1)], dim=1)
+        else: 
+            input_X = torch.cat([xt, x_k_residual.unsqueeze(1)], dim=1)
 
         k = x0[:, 1:2]
         predicted_x0_residual = model(self.model_input(input_X), t, month)

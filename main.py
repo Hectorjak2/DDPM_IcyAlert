@@ -63,6 +63,7 @@ def run_ddpm(dataset: DatasetChoice,
                 forecast_period=forecast_period,
                 batch_size=train_config.batch_size,
                 unfolded=train_config.unfolded_loss,
+                dose=train_config.dose_loss,
             ) 
     else: 
         ddpm = DDPM(
@@ -146,7 +147,7 @@ def run_unet(dataset: DatasetChoice,
 
     #Defining the dataset and dataloader
     if dataset in (DatasetChoice.CARRA_WEST, DatasetChoice.CARRA_TEST, DatasetChoice.CARRA_CROPPED): 
-        train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=train_config.training_slice, batch_dim=False, standardize=True)
+        train_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=train_config.training_slice, batch_dim=False, ddpm=False)
 
     dataloader = torch.utils.data.DataLoader(
         train_ds,

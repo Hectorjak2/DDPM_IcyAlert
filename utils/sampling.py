@@ -135,7 +135,7 @@ def forecast_dataset(train_cfg: TrainConfig) -> CARRA2Forecast:
 
 def unet_training_set(train_cfg: TrainConfig) -> CARRA2Forecast:
     """The standardized training set, for the mean, std and land mask the residual UNet was trained with."""
-    return CARRA2Forecast("siconc", device, area=train_cfg.dataset, time_slice=TrainConfig().training_slice, batch_dim=False, standardize=True)
+    return CARRA2Forecast("siconc", device, area=train_cfg.dataset, time_slice=TrainConfig().training_slice, batch_dim=False, ddpm=False)
 
 
 def dropout_forecaster(weights: str, train_cfg: TrainConfig, unet_cfg: UnetConfig) -> UnetForecaster:
