@@ -35,6 +35,13 @@ def residual_stats_key(area: DatasetChoice, time_slice: slice | list[slice] | No
     return f"{area.value}|" + ",".join("all" if s is None else f"{s.start}:{s.stop}" for s in slices)
 
 
+def load_residual_stats(area: DatasetChoice, time_slice: slice | list[slice] | None) -> dict:
+    """The cached entry for (area, time_slice), or {} if utils/residual_stats.py never computed it."""
+    if not RESIDUAL_STATS_PATH.exists():
+        return {}
+    return json.loads(RESIDUAL_STATS_PATH.read_text()).get(residual_stats_key(area, time_slice), {})
+
+
 def to_model_range(x: torch.Tensor) -> torch.Tensor:
     """Map data in [0, 1] to the [-1, 1] range the diffusion process assumes."""
     return x * 2.0 - 1.0
@@ -181,10 +188,10 @@ class CARRA2Forecast(CARRA2):
         # Loaded from the cache written by utils/residual_stats.py, since computing it reads
         # the whole slice. None if this (area, slice) was never computed, which is expected for
         # test sets: the model must use the training set's values, never the test set's own.
-        stats = {}
-        if RESIDUAL_STATS_PATH.exists():
-            stats = json.loads(RESIDUAL_STATS_PATH.read_text()).get(residual_stats_key(area, time_slice), {})
+        stats = load_residual_stats(area, time_slice)
         self.residual_mean, self.residual_std = stats.get("mean"), stats.get("std")
+        # The same std in the units __getitem__ returns: what the models divide the residual by.
+        self.residual_scale = stats.get("std_ddpm" if ddpm else "std_unet")
 
     def residual_stats(self, stride: int = 5) -> dict:
         """

@@ -27,14 +27,15 @@ class UnetConfig:
     channels: list = field(default_factory=lambda: [64, 128, 128, 128])
     n_res_blocks: int = 1
     attention: bool = True
+    in_channels: int = 5
 
 @dataclass
 class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 1000
-    schedule: str = "cosine"
+    timesteps: int = 500
+    schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -46,9 +47,10 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 140
+    cosine_shift_res: int = 512
 
-    residual_std: float = 1.0  # spread of the k+1 − k residual (model units) over TRAINING_SLICE; 1.0 = unscaled (pre-change checkpoints)
+    # The residual std is not set here: it comes per (area, training slice) from
+    # utils/residual_stats.json via CARRA2Forecast.residual_scale, and is written to config.txt.
 
 
 TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
@@ -73,21 +75,21 @@ class TrainConfig:
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
 
     #Forecasting and training settings: 
-    training_slice: slice = TRAINING_SLICE
-    forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
+    training_slice: slice = SMOKE_TRAINING_SLICE
+    forecasting_slice: slice = SMOKE_TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
-    dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-objective-cres"
-    batch_size: int = 4
-    epochs: int = 10
+    dataset = DatasetChoice.CARRA_TEST
+    experiment_name: str = f"{training_type}-local-shif"
+    batch_size: int = 2
+    epochs: int = 1
     lr: float = 3e-4
-    number_of_samples: int = 100
+    number_of_samples: int = 20
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = True 
-    weights: str = None#"ddpm-local-old/final_weights.pth"
+    weights: str = None#"ddpm-local/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

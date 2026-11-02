@@ -21,6 +21,7 @@
 - **[utils/dataloader.py](../utils/dataloader.py)** — Dataset classes and range conversion.
   - `to_model_range(x)` / `to_data_range(x)` — map `[0, 1]` ↔ `[-1, 1]` (see Data Normalization below).
   - `CARRA2(selected_variable, device, time_slice, WEST, TEST, batch_dim)` — loads CARRA2 reanalysis data from a zarr store. `siconc` is sea-ice concentration. Exposes `finite_mask` (`[1, H, W]`, 1.0 = water) derived once from the first time step.
+  - `CARRA2Forecast` — one-month windows `(k+1, k, k−1)`. Exposes `residual_scale`, the training-set residual std in its own units, loaded from `utils/residual_stats.json` (see Residual Standardization).
   - `FashionMNIST(train, device, batch_dim)` — wraps torchvision's FashionMNIST, auto-downloads. `finite_mask` is `None`.
 - **[utils/device_utils.py](../utils/device_utils.py)** — Device detection.
   - `get_device()` — returns a device string (`"cuda"`, `"mps"`, or `"cpu"`) based on availability.
@@ -107,10 +108,27 @@ Both forecasters predict the month-to-month change `k+1 − k` rather than the f
 
 - **ConditionalDDPM** diffuses the residual (model units, range `[-2, 2]`). The `x0_pred` clamp is `[-1 − k, 1 − k]`, so that `k + x0_pred` stays in `[-1, 1]`. A `±1` clamp would cap the change at ±0.5 SIC; month-apart changes reach the full ±1 SIC (measured: max |residual| = 2.0 for 2000-03-15 → 2000-04-15). `sample(..., base=)` sets the field the residual is added to, and its clamp bounds. `analysis_sampling` passes the true `k` with a wrong context, so the wrong-context loss measures reliance on conditioning only, not a wrong baseline.
 - **ConditionalDDPM's context is also a residual**: the network input is `[x_t, k − (k−1), land mask]` (3 channels), not `[x_t, k, k−1, mask]`. The conditioning then lives in the same "change" space as the target. Because `k` is no longer an input channel, `p_sample` needs `base` (day `k`) explicitly; `sample` derives it from `context[0]` by default. Checkpoints trained with the old 4-channel input cannot be loaded.
-- **UNet baseline** (standardized units) outputs the residual `(k+1 − k)/std`; the mean cancels. The loss is taken on the reconstruction `k + pred`, which equals the loss on the residual, so the persistence ratio printed in training stays directly comparable.
-- **`SimpleUnet.final_conv` is zero-initialised**, so at init the baseline is exactly persistence (ratio 1.0) and the DDPM predicts zero noise. This is shared by both models; the same choice as Dhariwal & Nichol's output layer.
+- **UNet baseline** (z-scored fields, `(x − μ_f)/σ_f`; the mean cancels in the residual) predicts the standardized residual `(k+1 − k)/σ_r` and reconstructs `k + σ_r·pred`. The loss is taken on the standardized residual. Persistence is a zero residual, so the persistence ratio printed in training is unchanged by the scaling; the absolute loss values are `1/σ_r²` larger than before.
+- **`SimpleUnet.final_conv` is zero-initialised**, so at init the baseline is exactly persistence (ratio 1.0) and the DDPM predicts a zero residual. This is shared by both models; the same choice as Dhariwal & Nichol's output layer.
 
-**Open: residual scale vs. noise schedule.** The schedule was tuned for full fields. The residual has a smaller std (0.34 vs. 0.92 in model units for the date pair above, near the ice maximum; melt/freeze-up months will differ), which shifts the effective log-SNR by `2·log(σ_r/σ_x) ≈ −2.0` on top of the schedule's own shift. Not yet resolved: either divide the residual by a training-set `σ_r`, or retune `cosine_shift_res`.
+### Residual Standardization
+
+**Location:** [utils/residual_stats.py](../utils/residual_stats.py) → [utils/residual_stats.json](../utils/residual_stats.json); loaded by `CARRA2Forecast.__init__` as `residual_scale`; used in `ConditionalDDPM`, `train_network` and `UnetForecaster`.
+
+The field normalization of each model (DDPM `[-1, 1]`, UNet z-score) does not give the *residual* unit scale: how much SIC changes in a month is a property of the data, not of the field's own std. Measured on CARRA_CROPPED, TRAINING_SLICE, the residual std is 0.536 in DDPM units and 0.598 in UNet units. Both models therefore divide the residual by its training-set std `σ_r` and multiply back after prediction:
+
+- **DDPM:** both residual channels (the diffused target `k+1 − k` and the context `k − (k−1)`) are divided by `σ_r`. The `x̂₀` clamp becomes `[(−1 − k)/σ_r, (1 − k)/σ_r]`, and the forecast is `k + σ_r·x̂₀`. Without this the schedule, which assumes unit-scale `x₀`, would see an SNR `σ_r² ≈ 0.29×` lower at every `t` (log-SNR −1.25). This replaces the earlier option of retuning `cosine_shift_res` for the residual.
+- **UNet:** for a unit-scale regression target, and so both models handle the residual the same way.
+- **Mean is not subtracted.** It is ≈ 0 (−0.003 in DDPM units on CROPPED); the seasonal sign is left to the month embedding.
+
+**How σ_r is computed.** `CARRA2Forecast.residual_stats(stride=5)`: every 5th one-month window `(k, k+1)` of the slice, pooled over all water pixels, in SIC units. Neighbouring anchors are near-duplicates, so stride 5 differs from stride 1 by < 0.1% (checked on CARRA_TEST), and unlike a single year it spans every year. Model units follow exactly because offsets cancel in a difference: `std_ddpm = 2·σ_SIC`, `std_unet = σ_SIC / field_std`. 49% of water pixels have exactly zero change on CROPPED (35% on TEST), so after scaling the ice-edge residuals sit well above 1.
+
+| key | σ_r SIC | σ_r DDPM | σ_r UNet | field std | frac zero |
+|---|---|---|---|---|---|
+| CARRA_CROPPED, 2000-01-01:2019-10-31 | 0.268 | 0.536 | 0.598 | 0.448 | 49% |
+| CARRA_TEST, 2000-01-01:2004-10-31 (smoke) | 0.323 | 0.646 | 0.719 | 0.449 | 35% |
+
+**Why a cached json, not computed at init.** It needs a full read of the slice; the json is committed so HPC uses the same numbers without copying data. Entries are keyed by `(area, time_slice)`; a slice with no entry (every test set) gets `residual_scale = None`, and the models assert on it, so a test set's own statistics can never be used. Recompute with `python -m utils.residual_stats` (or `--area`) after changing a training slice. `σ_r` is not in config.py; `dump_config_snapshot` writes it to `config.txt`. **Checkpoints trained before this change (DDPM and UNet, including deep-ensemble members) are incompatible.**
 
 ### Noise Schedule: Shifted Cosine, Resolution-Aware
 

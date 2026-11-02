@@ -26,7 +26,7 @@ from tqdm import tqdm
 from config import UnetConfig, DDPMConfig, TrainConfig
 from models.ddpm import DDPM, ConditionalDDPM
 from models.unet import SimpleUnet
-from utils.dataloader import CARRA2Forecast, to_model_range, to_data_range
+from utils.dataloader import CARRA2Forecast, load_residual_stats, to_model_range, to_data_range
 from utils.device_utils import get_device
 
 device = get_device()
@@ -60,9 +60,11 @@ class UnetForecaster(Forecaster):
     in train()), or a dict member seed -> SimpleUnet (a deep ensemble).
     """
 
-    def __init__(self, models: SimpleUnet | dict[int, SimpleUnet], mean: float, std: float):
+    def __init__(self, models: SimpleUnet | dict[int, SimpleUnet], mean: float, std: float, residual_std: float):
+        assert residual_std is not None, "no residual std for the training set; run python -m utils.residual_stats"
         self.models = models
         self.mean, self.std = float(mean), float(std)
+        self.residual_std = float(residual_std)
 
     def encode(self, sic):
         return (sic - self.mean) / self.std
@@ -77,8 +79,8 @@ class UnetForecaster(Forecaster):
                        model.mask_channel.expand(1, -1, -1, -1)], dim=1)
         t = torch.zeros(1, device=context.device)
         month = torch.tensor([month], device=context.device)
-        # The network predicts the residual k+1 - k; add day k back, as in train_network.
-        pred = x[:, 0:1] + model(x, t, month)  # [1, 1, H, W], standardized
+        # The network predicts the standardized residual; scale it back and add day k, as in train_network.
+        pred = x[:, 0:1] + self.residual_std * model(x, t, month)  # [1, 1, H, W], standardized
         # Back to SIC, clamped like the DDPM output, land set to NaN.
         return self.decode(pred).clamp(0.0, 1.0).masked_fill(~model.water_mask, float("nan"))[0]
 
@@ -142,10 +144,10 @@ def dropout_forecaster(weights: str, train_cfg: TrainConfig, unet_cfg: UnetConfi
     """MC-dropout ensemble of the residual UNet baseline in `weights`."""
     assert unet_cfg.dropout > 0, "MC dropout needs UnetConfig.dropout > 0"
     train_ds = unet_training_set(train_cfg)
-    model = build_unet(3, weights, unet_cfg, land_mask=train_ds.finite_mask)
+    model = build_unet(unet_cfg.in_channels-1, weights, unet_cfg, land_mask=train_ds.finite_mask)
     # train() only switches dropout on: SimpleUnet normalises with GroupNorm, which has no running statistics.
     model.train()
-    return UnetForecaster(model, train_ds.mean, train_ds.std)
+    return UnetForecaster(model, train_ds.mean, train_ds.std, train_ds.residual_scale)
 
 
 def deep_forecaster(members_dir: str, member_seeds: list[int], train_cfg: TrainConfig, unet_cfg: UnetConfig) -> UnetForecaster:
@@ -159,7 +161,7 @@ def deep_forecaster(members_dir: str, member_seeds: list[int], train_cfg: TrainC
     # Dropout off: here the spread comes from the members' different initial weights and training runs.
     for model in models.values():
         model.eval()
-    return UnetForecaster(models, train_ds.mean, train_ds.std)
+    return UnetForecaster(models, train_ds.mean, train_ds.std, train_ds.residual_scale)
 
 
 def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfig, unet_cfg: UnetConfig, ddpm_cfg: DDPMConfig) -> DDPMForecaster:
@@ -174,6 +176,10 @@ def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfi
         forecast_period=train_cfg.forecasting_slice,
         batch_size=train_cfg.batch_size,
         unfolded=False,  # only affects the training loss
+        dose=None,  # only affects the training loss
+        # The training set's residual std, as for the UNet in unet_training_set; read from the
+        # cache directly since the DDPM needs nothing else from the training set.
+        residual_std=load_residual_stats(train_cfg.dataset, TrainConfig().training_slice).get("std_ddpm"),
     )
     model = build_unet(3, weights, unet_cfg)
     # Dropout off: here the spread comes from the reverse process, not the network.

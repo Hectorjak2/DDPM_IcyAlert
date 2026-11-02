@@ -29,19 +29,22 @@ def snapshot_text(cfgs: tuple, ddpm: DDPM | None = None) -> str:
         lines.append("")
     return "\n".join(lines)
 
-def dump_config_snapshot(train_cfg: TrainConfig ,ddpm: DDPM, unet_config:UnetConfig = UnetConfig(), ddpm_config:DDPMConfig = DDPMConfig(), unet:bool = False) -> list[Path]:
+def dump_config_snapshot(train_cfg: TrainConfig ,ddpm: DDPM, unet_config:UnetConfig = UnetConfig(), ddpm_config:DDPMConfig = DDPMConfig(), unet:bool = False, residual_std: float | None = None) -> list[Path]:
     """Write the config values used by this run into the run's weights dir and samples dir.
 
     config.py keeps changing between runs, so snapshotting the values next to the
     weights and the samples means an old result can still be traced back to what
     produced it. Both get a copy because samples_dir is on /work3 on HPC, apart from
     the weights. The realised noise schedule is included because it depends on the
-    image size, which only exists at runtime.
+    image size, which only exists at runtime. residual_std (in the model's units) is included
+    because it comes from utils/residual_stats.json, not from config.py.
     """
 
     # A set, so the file is written once when both dirs are the same (locally both are results/).
     out_dirs = {Path(d) / train_cfg.experiment_name for d in (train_cfg.output_dir, train_cfg.samples_dir)}
     text = snapshot_text((unet_config, ddpm_config, train_cfg), None if unet else ddpm)
+    if residual_std is not None:
+        text += f"Residual std (model units, the residual is divided by it): {residual_std}\n"
 
     out_paths = []
     for out_dir in out_dirs:

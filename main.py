@@ -64,7 +64,8 @@ def run_ddpm(dataset: DatasetChoice,
                 batch_size=train_config.batch_size,
                 unfolded=train_config.unfolded_loss,
                 dose=train_config.dose_loss,
-            ) 
+                residual_std=train_ds.residual_scale,
+            )
     else: 
         ddpm = DDPM(
             timesteps=timesteps,
@@ -78,7 +79,7 @@ def run_ddpm(dataset: DatasetChoice,
 
     # Build UNet from config (see config.py for the downsized CARRA2 config).
     model = SimpleUnet(
-        in_channels=3,
+        in_channels=unet_config.in_channels,
         out_channels=unet_config.out_channels,
         channels=unet_config.channels,
         time_emb_dim=unet_config.time_emb_dim,
@@ -89,7 +90,7 @@ def run_ddpm(dataset: DatasetChoice,
     )
 
     print(f"Writing config snapshot")
-    dump_config_snapshot(train_config, ddpm, ddpm_config=ddpm_config)
+    dump_config_snapshot(train_config, ddpm, ddpm_config=ddpm_config, residual_std=getattr(train_ds, "residual_scale", None))
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
@@ -161,7 +162,7 @@ def run_unet(dataset: DatasetChoice,
         torch.manual_seed(initialization_seed)
 
     model = SimpleUnet(
-                in_channels=3,
+                in_channels=unet_config.in_channels-1,
                 out_channels=unet_config.out_channels,
                 channels=unet_config.channels,
                 time_emb_dim=unet_config.time_emb_dim,
@@ -173,7 +174,7 @@ def run_unet(dataset: DatasetChoice,
                 attention=unet_config.attention,
             )
     print(f"Writing config snapshot")
-    dump_config_snapshot(train_config, unet_config=unet_config, ddpm=model, unet=True)
+    dump_config_snapshot(train_config, unet_config=unet_config, ddpm=model, unet=True, residual_std=train_ds.residual_scale)
     
     if load_weights: 
         print(f"Loading model weights: {load_weights}")
@@ -182,13 +183,13 @@ def run_unet(dataset: DatasetChoice,
     if train: 
         print("Training the model...")
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        model = train_network(model, dataloader, optimizer, device, epochs=epochs, experiment_name=experiment_name, output_dir=train_config.output_dir)
+        model = train_network(model, dataloader, optimizer, train_ds.residual_scale, device, epochs=epochs, experiment_name=experiment_name, output_dir=train_config.output_dir)
 
     if sampling: 
         print("Sampling the model...")
         model.eval()
         # The forecaster standardizes with the training statistics the model was trained on.
-        forecast(UnetForecaster(model, train_ds.mean, train_ds.std), forecast_dataset(train_config), [0], train_config.number_of_samples,
+        forecast(UnetForecaster(model, train_ds.mean, train_ds.std, train_ds.residual_scale), forecast_dataset(train_config), [0], train_config.number_of_samples,
                  train_config.sample_seed, Path(train_config.samples_dir) / train_config.experiment_name / "samples.pkl")
 
     print("SCRIPT DONE ")

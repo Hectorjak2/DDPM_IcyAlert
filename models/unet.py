@@ -341,7 +341,10 @@ class SimpleUnet(BaseUnet):
         
         return self.final_conv(F.silu(self.final_norm(x)))
 
-def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, device: str = "cpu", epochs: int = 1, experiment_name: str = "default", output_dir: str = "results"):
+def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, residual_std: float, device: str = "cpu", epochs: int = 1, experiment_name: str = "default", output_dir: str = "results"):
+    """residual_std: std of the residual k+1 - k in the standardized units of the dataloader over the
+    training set (CARRA2Forecast.residual_scale). The network predicts the residual divided by it."""
+    assert residual_std is not None, "no residual std for this training set; run python -m utils.residual_stats"
     model.to(device)
     model.train()
     os.makedirs(f"{output_dir}/{experiment_name}", exist_ok=True)
@@ -363,17 +366,19 @@ def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, opt
             optimizer.zero_grad()
             t = torch.Tensor([0]).to(device)
 
-            # The network predicts the residual k+1 - k, as in ConditionalDDPM; reconstruct
-            # k+1 by adding day k back. The loss on the reconstruction equals the loss on the
-            # residual, so it stays directly comparable to persistence below.
-            pred = batch[:, 1:2] + model(x, t, month)
+            # The network predicts the standardized residual (k+1 - k) / residual_std, as in
+            # ConditionalDDPM; the forecast is k + residual_std * pred. The loss is taken on the
+            # standardized residual, so the regression target has unit scale. Persistence
+            # (k+1 = k) is a zero residual, so the ratio below is unchanged by the scaling.
+            pred = model(x, t, month)
+            target_residual = (target - batch[:, 1:2]) / residual_std
 
-            assert pred.shape == target.shape
-            se = (pred - target) ** 2
+            assert pred.shape == target_residual.shape
+            se = (pred - target_residual) ** 2
             loss = se[model.water_mask.expand_as(se)].mean()
 
             with torch.no_grad():
-                se_p = (batch[:, 1:2] - target) ** 2          # persistence: x(k+1) = x(k)
+                se_p = target_residual ** 2                   # persistence: x(k+1) = x(k)
                 loss_p = se_p[model.water_mask.expand_as(se_p)].mean()
 
             total_loss += loss.item()
