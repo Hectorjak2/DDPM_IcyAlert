@@ -27,7 +27,7 @@ class UnetConfig:
     channels: list = field(default_factory=lambda: [64, 128, 128, 128])
     n_res_blocks: int = 1
     attention: bool = True
-    in_channels: int = 5
+    in_channels: int = 4
 
 @dataclass
 class DDPMConfig:
@@ -80,7 +80,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-dobuleC"
+    experiment_name: str = f"{training_type}-singleC"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4

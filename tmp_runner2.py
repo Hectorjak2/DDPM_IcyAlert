@@ -1,23 +1,42 @@
 from config import UnetConfig, DDPMConfig, TrainConfig
 from main import run_ddpm, run_unet
 
-ddpm_conf = DDPMConfig()
-ddpm_conf.schedule = "shifted_cosine"
-
-
+unet_conf = UnetConfig()
 train_conf = TrainConfig()
-train_conf.experiment_name = "ddpm-residual-shifted"
+ddpm_conf = DDPMConfig()
+train_conf.experiment_name = "ddpm-originalC"
 
-model = run_ddpm(
+model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,
             forecast_period = train_conf.forecasting_slice,
-            timesteps=DDPMConfig.timesteps,
+            timesteps=ddpm_conf.timesteps,
             batch_size=train_conf.batch_size,
             epochs=train_conf.epochs,
             lr=train_conf.lr,
             experiment_name=train_conf.experiment_name,
-            sampling=train_conf.sampling,
-            train_config=train_conf,
-            unet_config=UnetConfig(),
+            sampling=train_conf.sampling, 
+            train=train_conf.training,
+            load_weights=train_conf.weights,
             ddpm_config=ddpm_conf,
+            train_config=train_conf,
+            unet_config=unet_conf
+        )
+
+train_conf.experiment_name = "ddpm-originalC-shift"
+ddpm_conf.schedule = "shifted_cosine"
+
+model, ddpm, train_ds = run_ddpm(
+            dataset=train_conf.dataset,
+            forecast_period = train_conf.forecasting_slice,
+            timesteps=ddpm_conf.timesteps,
+            batch_size=train_conf.batch_size,
+            epochs=train_conf.epochs,
+            lr=train_conf.lr,
+            experiment_name=train_conf.experiment_name,
+            sampling=train_conf.sampling, 
+            train=train_conf.training,
+            load_weights=train_conf.weights,
+            ddpm_config=ddpm_conf,
+            train_config=train_conf,
+            unet_config=unet_conf
         )

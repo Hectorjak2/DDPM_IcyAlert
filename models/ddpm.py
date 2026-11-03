@@ -342,7 +342,7 @@ class ConditionalDDPM(DDPM):
         context_residual = ((x0[:,1] - x0[:,2]) / s).unsqueeze(1) #k -k-1 residual, standardized
         context = x0[:,1:]
 
-        selected_context = torch.cat([context_residual, context],dim=1)
+        selected_context = context#torch.cat([context_residual, context],dim=1)
 
         # Sample x_t using the forward diffusion process, keeping the noise target
         noise = torch.randn_like(x0_residual.unsqueeze(1))
@@ -445,7 +445,7 @@ class ConditionalDDPM(DDPM):
         base = context[:, 0:1] if base is None else torch.nan_to_num(base, nan=0.0).unsqueeze(0)  # -> [1, 1, H, W]
         residual_context = ((context[:,0] - context[:,1]) / self.residual_std).unsqueeze(0)
 
-        selected_context = torch.concat([residual_context, context], dim=1)
+        selected_context = context#torch.concat([residual_context, context], dim=1)
         
         xt = torch.randn((1, 1, height, width), device=self.device)
         month_tensor = torch.tensor([month], device=self.device).long()
