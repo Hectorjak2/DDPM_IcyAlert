@@ -10,7 +10,8 @@ SCHEDULES = [
     Schedule("linear", beta_start=ddpm_conf.beta_start, beta_end=ddpm_conf.beta_end),
     Schedule("cosine"),
     Schedule("laplace", laplace_mu=0),
-    Schedule("shifted_cosine", cosine_shift_res=1600),
+    Schedule("shifted_cosine", cosine_shift_res=128),
+    Schedule("shifted_cosine", cosine_shift_res=64),
 ]
 
 TIMESTEPS = 1000

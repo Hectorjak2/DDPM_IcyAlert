@@ -60,11 +60,14 @@ def run_ddpm(dataset: DatasetChoice,
                 image_size=train_ds[0][0].shape[-1],
                 land_mask=train_ds.finite_mask,
                 schedule=ddpm_config.schedule,
+                cosine_shift_res=ddpm_config.cosine_shift_res,
                 forecast_period=forecast_period,
                 batch_size=train_config.batch_size,
                 unfolded=train_config.unfolded_loss,
                 dose=train_config.dose_loss,
                 residual_std=train_ds.residual_scale,
+                clamp_x0=ddpm_config.clamp_x0,
+                residual_context=ddpm_config.residual_context,
             )
     else: 
         ddpm = DDPM(
@@ -73,13 +76,15 @@ def run_ddpm(dataset: DatasetChoice,
             image_size=train_ds[0][0].shape[-1],
             land_mask=train_ds.finite_mask,
             schedule=ddpm_config.schedule,
-        ) 
+            cosine_shift_res=ddpm_config.cosine_shift_res,
+        )
 
     print(schedule_summary(ddpm))
 
     # Build UNet from config (see config.py for the downsized CARRA2 config).
     model = SimpleUnet(
-        in_channels=unet_config.in_channels,
+        # The conditional DDPM's input width depends on DDPMConfig.residual_context.
+        in_channels=ddpm.in_channels if forecast_period else unet_config.in_channels,
         out_channels=unet_config.out_channels,
         channels=unet_config.channels,
         time_emb_dim=unet_config.time_emb_dim,

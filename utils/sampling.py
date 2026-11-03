@@ -110,8 +110,9 @@ class DDPMForecaster(Forecaster):
 
 
 def build_unet(in_channels: int, weights: str, unet_cfg: UnetConfig, land_mask: torch.Tensor = None) -> SimpleUnet:
-    """SimpleUnet as built in main.py, with the weights in `weights` loaded. in_channels is 3 for both
-    the UNet baseline (k, k-1, land mask) and the DDPM (x_t, k - (k-1), land mask)."""
+    """SimpleUnet as built in main.py, with the weights in `weights` loaded. in_channels is 3 for
+    the UNet baseline (k, k-1, land mask); for the DDPM it is ConditionalDDPM.in_channels (4 or 5,
+    see DDPMConfig.residual_context)."""
     model = SimpleUnet(
         in_channels=in_channels,
         out_channels=unet_cfg.out_channels,
@@ -173,6 +174,7 @@ def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfi
         image_size=test_ds[0][0].shape[-1],
         land_mask=test_ds.finite_mask,
         schedule=ddpm_cfg.schedule,
+        cosine_shift_res=ddpm_cfg.cosine_shift_res,
         forecast_period=train_cfg.forecasting_slice,
         batch_size=train_cfg.batch_size,
         unfolded=False,  # only affects the training loss
@@ -180,8 +182,10 @@ def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfi
         # The training set's residual std, as for the UNet in unet_training_set; read from the
         # cache directly since the DDPM needs nothing else from the training set.
         residual_std=load_residual_stats(train_cfg.dataset, TrainConfig().training_slice).get("std_ddpm"),
+        clamp_x0=ddpm_cfg.clamp_x0,
+        residual_context=ddpm_cfg.residual_context,
     )
-    model = build_unet(3, weights, unet_cfg)
+    model = build_unet(ddpm.in_channels, weights, unet_cfg)
     # Dropout off: here the spread comes from the reverse process, not the network.
     model.eval()
     return DDPMForecaster(ddpm, model)

@@ -75,17 +75,22 @@ class DDPM:
         image_size: int = 896,
         land_mask: Optional[torch.Tensor] = None,
         schedule: str = None,
+        cosine_shift_res: int = None,
     ):
         """
         DDPM wrapper.
 
         Args:
             schedule: one of DDPM.SCHEDULES
+            cosine_shift_res: reference resolution of the shifted cosine schedule. Must be passed
+                explicitly to take a config instance's value; build_schedule's default is the
+                class-level DDPMConfig.cosine_shift_res, fixed at import time.
         """
         self.timesteps = timesteps
         self.device = device
         self.image_size = image_size
         self.schedule = schedule if schedule is not None else DDPMConfig.schedule
+        self.cosine_shift_res = cosine_shift_res if cosine_shift_res is not None else DDPMConfig.cosine_shift_res
         self.output_name = "" # Initialize output_name to an empty string
 
         # The land mask is resolved first
@@ -129,7 +134,8 @@ class DDPM:
         """
         Build the diffusion schedule from DDPMConfig, returning ``(betas, alphas, alphas_bar)``.
         """
-        return build_schedule(self.schedule, timesteps, self.image_size)
+        return build_schedule(self.schedule, timesteps, self.image_size,
+                              cosine_shift_res=self.cosine_shift_res)
 
 
     def model_input(self, xt: torch.Tensor) -> torch.Tensor:
@@ -307,20 +313,35 @@ class DDPM:
         model.save_weights(f"{train_config.output_dir}/{experiment_name}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
-    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, dose:int, residual_std: float, **kwargs):
+    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, dose:int, residual_std: float, clamp_x0: bool = True, residual_context: bool = False, **kwargs):
         """
         residual_std: std of the residual k+1 - k in model units [-1, 1] over the training set
             (CARRA2Forecast.residual_scale, from utils/residual_stats.json). Both residuals, the
             diffused target and the context channel, are divided by it, so the diffusion runs on
             unit-scale data as the noise schedule assumes.
+        residual_context: see DDPMConfig.residual_context.
         """
         super().__init__(*args, **kwargs)
         assert residual_std is not None, "no residual std for this training set; run python -m utils.residual_stats"
         self.residual_std = residual_std
+        self.clamp_x0 = clamp_x0  # see DDPMConfig.clamp_x0
+        self.residual_context = residual_context
+        # x_t + context (k, k-1, and optionally the residual) + land mask
+        self.in_channels = 1 + 2 + int(residual_context) + int(self.mask_channel is not None)
         self.forecast_period = forecast_period
         self.batch_size = batch_size
         self.unfolded = unfolded
         self.dose = dose
+
+    def build_context(self, context: torch.Tensor) -> torch.Tensor:
+        """Conditioning channels from context [B, 2, H, W] = (k, k-1), NaN-free.
+
+        Returns [k, k-1], or [(k - (k-1)) / residual_std, k, k-1] with residual_context.
+        """
+        if not self.residual_context:
+            return context
+        context_residual = ((context[:, 0] - context[:, 1]) / self.residual_std).unsqueeze(1)
+        return torch.cat([context_residual, context], dim=1)
 
     def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor): 
         """
@@ -338,11 +359,8 @@ class ConditionalDDPM(DDPM):
         x0 = torch.nan_to_num(x0, nan=0.0) #k+1, k, k-1
         s = self.residual_std
         x0_residual = (x0[:,0] - x0[:,1]) / s #k+1 - k residual, standardized
-        
-        context_residual = ((x0[:,1] - x0[:,2]) / s).unsqueeze(1) #k -k-1 residual, standardized
-        context = x0[:,1:]
 
-        selected_context = context#torch.cat([context_residual, context],dim=1)
+        selected_context = self.build_context(x0[:, 1:])  # see DDPMConfig.residual_context
 
         # Sample x_t using the forward diffusion process, keeping the noise target
         noise = torch.randn_like(x0_residual.unsqueeze(1))
@@ -366,10 +384,12 @@ class ConditionalDDPM(DDPM):
             coef_xt = self.posterior_mean_coef_xt[t].view(-1, 1, 1, 1)
             variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
 
-            mean = coef_x0 * torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s) + coef_xt * xt
+            # Simulate the same step as p_sample, so clamp exactly when sampling does.
+            x0_step = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s) if self.clamp_x0 else predicted_x0_residual
+            mean = coef_x0 * x0_step + coef_xt * xt
             xtm1 = mean + torch.sqrt(variance_t) * z
             
-            input_Xm1 = torch.cat([xtm1, selected_context.unsqueeze(1)], dim=1)
+            input_Xm1 = torch.cat([xtm1, selected_context], dim=1)
             unfolded_x0_residual = model(self.model_input(input_Xm1), t-1, month)
 
             se = 0.5 * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2 + 0.5 * (unfolded_x0_residual - x0_residual.unsqueeze(1)) ** 2
@@ -393,7 +413,7 @@ class ConditionalDDPM(DDPM):
 
         Args:
             model: The U-Net model.
-            x: [B, 2, H, W] = (x_t, k - (k-1)).
+            x: [B, C, H, W] = (x_t, *build_context(k, k-1)).
             t: Current timestep tensor of shape [B].
             base: Field the residual is added to (day k), [B, 1, H, W]. Required, since x
                 holds only the context residual, not k itself.
@@ -412,7 +432,8 @@ class ConditionalDDPM(DDPM):
         k = base
         #x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
         s = self.residual_std
-        predicted_x0_residual = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s)
+        if self.clamp_x0:
+            predicted_x0_residual = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s)
 
         # Posterior mean of q(x_{t-1} | x_t, x_0), plus noise
         mean = coef_x0 * predicted_x0_residual + coef_xt * x[:,0].unsqueeze(1)
@@ -443,10 +464,8 @@ class ConditionalDDPM(DDPM):
         # through the receptive field and compounds over every reverse step.
         context = torch.nan_to_num(context, nan=0.0).unsqueeze(0)  # -> [1, C, H, W]
         base = context[:, 0:1] if base is None else torch.nan_to_num(base, nan=0.0).unsqueeze(0)  # -> [1, 1, H, W]
-        residual_context = ((context[:,0] - context[:,1]) / self.residual_std).unsqueeze(0)
+        selected_context = self.build_context(context)  # see DDPMConfig.residual_context
 
-        selected_context = context#torch.concat([residual_context, context], dim=1)
-        
         xt = torch.randn((1, 1, height, width), device=self.device)
         month_tensor = torch.tensor([month], device=self.device).long()
         for t in reversed(range(self.timesteps)):

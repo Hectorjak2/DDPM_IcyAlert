@@ -4,7 +4,10 @@ from main import run_ddpm, run_unet
 unet_conf = UnetConfig()
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
-train_conf.experiment_name = "ddpm-dobuleC"
+
+ddpm_conf.residual_context = True
+train_conf.experiment_name = "ddpm-doubleC-shift128"
+ddpm_conf.cosine_shift_res = 128
 
 model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,
@@ -22,8 +25,8 @@ model, ddpm, train_ds = run_ddpm(
             unet_config=unet_conf
         )
 
-train_conf.experiment_name = "ddpm-dobuleC-shift"
-ddpm_conf.schedule = "shifted_cosine"
+train_conf.experiment_name = "ddpm-doubleC-shift64"
+ddpm_conf.cosine_shift_res = 64
 
 model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,

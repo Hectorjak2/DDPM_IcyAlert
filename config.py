@@ -35,7 +35,7 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "cosine"
+    schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -47,7 +47,21 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 1200
+    cosine_shift_res: int = 128
+
+    # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
+    # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
+    # ~half the domain) the clamp cuts only one side of a noisy estimate, biasing it inward
+    # (haze over open water, too little solid ice). Only affects sampling, plus the simulated
+    # step of the unfolded loss (TrainConfig.unfolded_loss); with that off, no retraining needed.
+    # The final reconstruction is clamped to [-1, 1] either way.
+    clamp_x0: bool = False
+
+    # Conditioning of ConditionalDDPM. False: context is [k, k-1], network input
+    # [x_t, k, k-1, mask] (4 channels). True: the standardized residual (k - (k-1)) / residual_std
+    # is prepended, input [x_t, k-(k-1), k, k-1, mask] (5 channels). The UNet's in_channels follows
+    # from this (ConditionalDDPM.in_channels), so weights trained with one setting do not load with the other.
+    residual_context: bool = False
 
     # The residual std is not set here: it comes per (area, training slice) from
     # utils/residual_stats.json via CARRA2Forecast.residual_scale, and is written to config.txt.
@@ -75,12 +89,12 @@ class TrainConfig:
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
 
     #Forecasting and training settings: 
-    training_slice: slice = TRAINING_SLICE
+    training_slice: slice = TRAINING_SLICE #Set to None if forecasting should be disabled
     forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-singleC"
+    experiment_name: str = f"{training_type}-originalC-shift128"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -89,7 +103,7 @@ class TrainConfig:
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = True 
-    weights: str = None#"ddpm-local/final_weights.pth"
+    weights: str = None#"ddpm-originalC/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
