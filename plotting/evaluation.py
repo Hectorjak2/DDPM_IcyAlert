@@ -12,6 +12,9 @@ Reads ``results/<run>/samples.pkl`` written by
    target month, spread over the melt (Apr-Sep) and cool (Oct-Mar) season.
 6. ``ice_edge_error`` -- prediction for one cool- and one melt-season sample, with the
    true (black) and predicted (magenta) 0.15 ice edge and large-error pixels in red.
+7. ``mean_residual``  -- mean residual k+1 - k per season, predicted (top) vs truth (bottom).
+   Random-sign sample noise averages out, so this shows the model's systematic signal
+   (has it learned the seasonal melt/growth?) and any one-sided bias.
 
 Also prints a table of the per-sample MSE over water, overall and per season, next to
 the persistence and climatology baselines (see ``models.climatology``).
@@ -40,6 +43,9 @@ from utils.dataloader import to_data_range
 # Sea-ice colormap: open water dark blue, full ice white, land grey.
 SIC_CMAP = plt.cm.Blues_r.copy()
 SIC_CMAP.set_bad("lightgray")
+# Residual (k+1 - k) colormap: red = ice loss, blue = ice gain, land grey as above.
+RESIDUAL_CMAP = plt.cm.RdBu.copy()
+RESIDUAL_CMAP.set_bad("lightgray")
 
 N_BINS = 100  # 0.01-wide target-SIC bins for the calibration plot
 MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration curves
@@ -56,6 +62,7 @@ ERROR_THRESHOLD = 0.1
 # Preferred target month per season in ice_edge_error: maximum (Mar) and minimum (Sep)
 # ice extent.
 EDGE_MONTHS = {"cool": 3, "melt": 9}
+SEASON_TITLES = {"cool": "Cool (Oct--Mar)", "melt": "Melt (Apr--Sep)"}
 
 
 def _month(date) -> str:
@@ -470,6 +477,61 @@ def plot_mse_by_lead(leads, out_dir):
     plt.close(fig)
 
 
+def mean_residuals(data) -> dict:
+    """{season: (mean predicted residual, mean true residual, n dates)}, each [H, W] SIC, land NaN.
+    Seasons without samples are left out."""
+    by_season = {season: ([], []) for season in SEASONS}
+    for pred, target, k, dates in zip(data["predictions"], data["targets"], data["k"], data["times"]):
+        month = pd.Timestamp(dates[0]).month  # month of the target
+        season = next(s for s, months in SEASONS.items() if month in months)
+        by_season[season][0].append(pred - k)
+        by_season[season][1].append(target - k)
+    # Land is NaN in every field, so a plain mean keeps it NaN
+    return {season: (np.mean(p, axis=0), np.mean(t, axis=0), len(p))
+            for season, (p, t) in by_season.items() if p}
+
+
+def plot_mean_residual(data, out_dir):
+    """Mean residual k+1 - k per season (columns), predicted (top row) vs truth (bottom row),
+    on one symmetric colour scale. Also prints the mean and RMS of their difference."""
+    means = mean_residuals(data)
+    seasons = [s for s in ("cool", "melt") if s in means]
+    if not seasons:
+        print("No samples -- skipping mean_residual.")
+        return
+
+    # Shared scale for all panels, so seasons and rows compare directly
+    vmax = np.nanpercentile(np.abs(np.stack([f for s in seasons for f in means[s][:2]])), 99)
+
+    fig, axes = plt.subplots(2, len(seasons), squeeze=False)
+    for col, season in enumerate(seasons):
+        pred, true, n = means[season]
+        for row, field in enumerate((pred, true)):
+            img = axes[row, col].imshow(field, cmap=RESIDUAL_CMAP, vmin=-vmax, vmax=vmax,
+                                        origin="lower", interpolation="none")
+            _clean_image_axis(axes[row, col])
+        axes[0, col].set_title(f"{SEASON_TITLES[season]}, $n={n}$")
+    axes[0, 0].set_ylabel("Predicted")
+    axes[1, 0].set_ylabel("Truth")
+
+    # One inset colorbar per row next to the right-hand map, so it matches the image height;
+    # a colorbar spanning several axes breaks savefig's tight_layout.
+    for row in range(2):
+        cbar = fig.colorbar(img, cax=axes[row, -1].inset_axes([1.04, 0, 0.05, 1]),
+                            ticks=[-vmax, 0, vmax])
+        cbar.ax.set_yticklabels([f"${-vmax:.2f}$", "$0$", f"${vmax:.2f}$"])
+        cbar.set_label("SIC change", labelpad=4)
+
+    print("Mean residual, predicted - truth, over water:")
+    for season in seasons:
+        diff = means[season][0] - means[season][1]
+        print(f"  {season}: mean {np.nanmean(diff):+.4f}, RMS {np.sqrt(np.nanmean(diff ** 2)):.4f}")
+    print()
+
+    savefig(fig, out_dir, "mean_residual", width=TEXTWIDTH_IN, height=4.8)
+    plt.close(fig)
+
+
 def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None, lead: int = 1):
     run_dir, leads = load_leads(path)
     data = leads[lead - 1]
@@ -495,6 +557,7 @@ def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None, lea
     else:
         edge_indices = dict(zip(("cool", "melt"), edge_indices))
     plot_ice_edge_error(data, out_dir, edge_indices)
+    plot_mean_residual(data, out_dir)
     print(f"Wrote figures to {out_dir}/")
 
 

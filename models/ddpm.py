@@ -376,6 +376,11 @@ class ConditionalDDPM(DDPM):
         k = x0[:, 1:2]
         predicted_x0_residual = model(self.model_input(input_X), t, month)
 
+        #Loss weighitng 
+        snr = self.alphas_bar[t] / (1 - self.alphas_bar[t])
+        w = snr.clamp(min=1.0, max=5.0).view(-1, 1, 1, 1)   # truncated-SNR, capped as in min-SNR-γ
+
+
         # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];        
         if self.unfolded and (t > 0).all():
             #Simulating one step of the chain: 
@@ -394,7 +399,7 @@ class ConditionalDDPM(DDPM):
 
             se = 0.5 * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2 + 0.5 * (unfolded_x0_residual - x0_residual.unsqueeze(1)) ** 2
         else: 
-            se = (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
+            se = w * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
 
         #se = (predicted_x0_residual - noise) ** 2
         loss = se[self.water_mask.expand_as(se)].mean()
