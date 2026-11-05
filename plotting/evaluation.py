@@ -557,18 +557,31 @@ def load_loss_history(run: str | Path) -> tuple[Path, dict] | None:
 
 
 def plot_loss_history(history: dict, out_dir):
-    """Training vs validation loss per epoch, averaged over all timesteps."""
+    """Training vs validation loss per epoch (DDPM: averaged over all timesteps).
+
+    For the UNet the validation persistence loss (k+1 = k) is drawn as a reference line: it is
+    the same every epoch, and the model is only useful below it.
+    """
     epochs = np.arange(1, len(history["train"]) + 1)
+    # Pickles written before "model" was stored are all from the DDPM.
+    unet = history.get("model", "ddpm") == "unet"
 
     fig, ax = plt.subplots()
     ax.plot(epochs, history["train"], color=COLORS[0], marker=MARKERS[0], label="Training")
     if history["val"]:
         ax.plot(epochs, history["val"], color=COLORS[1], marker=MARKERS[1], label="Validation")
+    if unet and history.get("val_persistence"):
+        ax.axhline(np.mean(history["val_persistence"]), color=MUTED, linewidth=0.8,
+                   linestyle=REF_LINESTYLE, label="Persistence (val)")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xlabel("epoch")
-    # The truncated-SNR weight of ConditionalDDPM.compute_loss (not used with unfolded_loss).
-    # Too long for the y-axis at half width, so the formula is the title.
-    ax.set_title(r"$\min(\max(\mathrm{SNR}_t, 1), 5)\,\|\hat{x}_0 - x_0\|^2$")
+    # Too long for the y-axis at half width, so the formula is the title. x_0 is the
+    # standardized residual (k+1 - k) / sigma_r in both models.
+    if unet:
+        ax.set_title(r"$\|\hat{x}_0 - x_0\|^2$")
+    else:
+        # The truncated-SNR weight of ConditionalDDPM.compute_loss (not used with unfolded_loss).
+        ax.set_title(r"$\min(\max(\mathrm{SNR}_t, 1), 5)\,\|\hat{x}_0 - x_0\|^2$")
     ax.set_ylabel("loss")
     ax.legend()
 

@@ -1,16 +1,15 @@
 import math
 import os
 import pickle
-import sys
 from random import sample
 
 import torch
-from tqdm import tqdm
 from torch.optim import Adam
 import torch.nn.functional as F
 from typing import Optional
 from config import DDPMConfig, TrainConfig
 from utils.dataloader import to_data_range
+from utils.progress import progress
 
 
 def build_schedule(
@@ -284,18 +283,6 @@ class DDPM:
     def _bucket_means(bucket_sum: list, bucket_count: list) -> list:
         return [s / c if c else None for s, c in zip(bucket_sum, bucket_count)]
 
-    @staticmethod
-    def _progress(iterable, desc: str):
-        """Progress bar for one pass over a dataloader.
-
-        Written to stdout, not tqdm's default stderr, so it lands in the same log file as the
-        epoch summaries (titan.s splits .out and .err). In a log file every refresh is appended
-        rather than redrawn, so refresh only every 30 s there to keep the file small.
-        """
-        interactive = sys.stdout.isatty()
-        return tqdm(iterable, desc=desc, file=sys.stdout, dynamic_ncols=interactive,
-                    ncols=None if interactive else 100, mininterval=0.1 if interactive else 30)
-
     def evaluate(self, model, dataloader, device, timesteps: int, seed: int = 0, desc: str = "val") -> tuple[float, list]:
         """Training loss on `dataloader` without gradients: (mean loss, mean per timestep bucket).
 
@@ -314,7 +301,7 @@ class DDPM:
         bucket_count = [0] * self.N_BUCKETS
         with torch.no_grad(), torch.random.fork_rng(**fork_kwargs):
             torch.manual_seed(seed)
-            for batch in self._progress(dataloader, desc):
+            for batch in progress(dataloader, desc):
                 loss, t = self._batch_loss(model, batch, device, timesteps)
                 # Weighted by batch size, so a short last batch does not count as a full one.
                 total += loss.item() * t.shape[0]
@@ -339,7 +326,8 @@ class DDPM:
 
         # Per-epoch losses, pickled after every epoch so a crashed run keeps its curve.
         # timesteps is kept so plotting can label the buckets (plotting/evaluation.py, loss_history).
-        history = {"train": [], "val": [], "train_buckets": [], "val_buckets": [], "timesteps": timesteps}
+        # "model" tells plotting/evaluation.py which loss this is.
+        history = {"model": "ddpm", "train": [], "val": [], "train_buckets": [], "val_buckets": [], "timesteps": timesteps}
         best_val = float("inf")
 
         # Every 2 epochs: with epochs=10 (~10h total, ~1h/epoch) the old "% 10" cadence
@@ -356,7 +344,7 @@ class DDPM:
             bucket_count = [0] * self.N_BUCKETS
             total, n = 0.0, 0
 
-            pbar = self._progress(dataloader, f"Epoch {epoch} train")
+            pbar = progress(dataloader, f"Epoch {epoch} train")
             for batch in pbar:
                 optimizer.zero_grad()
 

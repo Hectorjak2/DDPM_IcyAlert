@@ -1,9 +1,12 @@
 import os
+import pickle
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
+
+from utils.progress import progress
 
 def _valid_groups(channels: int, groups: int) -> int:
     """Find largest divisor of channels that is <= groups"""
@@ -341,60 +344,107 @@ class SimpleUnet(BaseUnet):
         
         return self.final_conv(F.silu(self.final_norm(x)))
 
-def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, residual_std: float, device: str = "cpu", epochs: int = 1, experiment_name: str = "default", output_dir: str = "results"):
+def _residual_batch_loss(model: nn.Module, batch, residual_std: float, device) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """(loss, persistence loss, batch size) of the residual UNet on one dataloader batch.
+
+    The network predicts the standardized residual (k+1 - k) / residual_std, as in
+    ConditionalDDPM; the forecast is k + residual_std * pred. The loss is taken on the
+    standardized residual, so the regression target has unit scale. Persistence (k+1 = k) is a
+    zero residual, so the ratio loss / persistence is unchanged by the scaling.
+    """
+    batch, month = batch
+    batch = torch.nan_to_num(batch.to(device), nan=0.0)  # land NaN -> 0
+    month = month.to(device)
+    target = batch[:, 0:1]  # k+1; keep [B, 1, H, W] so it doesn't broadcast against pred
+
+    assert model.mask_channel is not None, "Land mask channel is not set in the model."
+    # Context (k, k-1) without the target, plus the land mask channel.
+    x = torch.concat([batch[:, 1:], model.mask_channel.expand(batch.shape[0], -1, -1, -1)], dim=1)
+    t = torch.zeros(1, device=device)
+
+    pred = model(x, t, month)
+    target_residual = (target - batch[:, 1:2]) / residual_std
+    assert pred.shape == target_residual.shape
+    water = model.water_mask.expand_as(target_residual)
+    loss = ((pred - target_residual) ** 2)[water].mean()
+    with torch.no_grad():
+        loss_p = (target_residual ** 2)[water].mean()  # persistence: x(k+1) = x(k)
+    return loss, loss_p, batch.shape[0]
+
+
+def evaluate_network(model: nn.Module, dataloader, residual_std: float, device, desc: str = "val") -> tuple[float, float]:
+    """(mean loss, mean persistence loss) on `dataloader`, without gradients and with dropout off.
+
+    The UNet has no other randomness, so unlike DDPM.evaluate no seeding is needed for epochs to
+    be comparable.
+    """
+    was_training = model.training
+    model.eval()
+    total, total_p, n = 0.0, 0.0, 0
+    with torch.no_grad():
+        for batch in progress(dataloader, desc):
+            loss, loss_p, b = _residual_batch_loss(model, batch, residual_std, device)
+            total += loss.item() * b  # weighted by batch size, so a short last batch counts less
+            total_p += loss_p.item() * b
+            n += b
+    model.train(was_training)
+    return total / n, total_p / n
+
+
+def train_network(model: nn.Module, dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, residual_std: float, device: str = "cpu", epochs: int = 1, experiment_name: str = "default", output_dir: str = "results", val_dataloader=None):
     """residual_std: std of the residual k+1 - k in the standardized units of the dataloader over the
-    training set (CARRA2Forecast.residual_scale). The network predicts the residual divided by it."""
+    training set (CARRA2Forecast.residual_scale). The network predicts the residual divided by it.
+
+    val_dataloader: held-out validation set (TrainConfig.validation_slice), scored after every
+    epoch. Per-epoch losses go to loss_history.pkl and the best epoch to best_weights.pth, as in
+    DDPM.train.
+    """
     assert residual_std is not None, "no residual std for this training set; run python -m utils.residual_stats"
     model.to(device)
     model.train()
-    os.makedirs(f"{output_dir}/{experiment_name}", exist_ok=True)
+    out_dir = f"{output_dir}/{experiment_name}"
+    os.makedirs(out_dir, exist_ok=True)
+
+    # "model" tells plotting/evaluation.py which loss this is. The persistence losses are the
+    # same loss for k+1 = k, the reference the UNet has to beat (ratio < 1).
+    history = {"model": "unet", "train": [], "val": [], "train_persistence": [], "val_persistence": []}
+    best_val = float("inf")
 
     for epoch in range(epochs):
-        total_loss = 0.0
-        total_p = 0.0
-        for step, batch in enumerate(dataloader):
-            batch, month = batch
-            batch = batch.to(device)
-            month = month.to(device)
-            batch = torch.nan_to_num(batch, nan=0.0)  # Replace NaNs with zeros
-            
-            target = batch[:, 0:1]  # target is the first channel (k+1); keep [B, 1, H, W] so it doesn't broadcast against pred
-
-            assert model.mask_channel is not None, "Land mask channel is not set in the model."
-            x = torch.concat([batch[:,1:], model.mask_channel.expand(batch.shape[0], -1, -1, -1)], dim=1)  #keeping only the context (k, k-1) and removing the target (k+1) from the input to the model. Concatenating the land mask channel
-
+        total, total_p, n = 0.0, 0.0, 0
+        pbar = progress(dataloader, f"Epoch {epoch} train")
+        for batch in pbar:
             optimizer.zero_grad()
-            t = torch.Tensor([0]).to(device)
+            loss, loss_p, b = _residual_batch_loss(model, batch, residual_std, device)
+            total += loss.item() * b
+            total_p += loss_p.item() * b
+            n += b
+            # Running epoch mean; refresh=False so it is shown at the bar's own refresh rate.
+            pbar.set_postfix(loss=f"{total / n:.4f}", ratio=f"{total / max(total_p, 1e-8):.3f}", refresh=False)
 
-            # The network predicts the standardized residual (k+1 - k) / residual_std, as in
-            # ConditionalDDPM; the forecast is k + residual_std * pred. The loss is taken on the
-            # standardized residual, so the regression target has unit scale. Persistence
-            # (k+1 = k) is a zero residual, so the ratio below is unchanged by the scaling.
-            pred = model(x, t, month)
-            target_residual = (target - batch[:, 1:2]) / residual_std
-
-            assert pred.shape == target_residual.shape
-            se = (pred - target_residual) ** 2
-            loss = se[model.water_mask.expand_as(se)].mean()
-
-            with torch.no_grad():
-                se_p = target_residual ** 2                   # persistence: x(k+1) = x(k)
-                loss_p = se_p[model.water_mask.expand_as(se_p)].mean()
-
-            total_loss += loss.item()
-            total_p += loss_p.item()                          # init total_p = 0.0 next to total_loss
-            print(f"Epoch {epoch} step {step} -- loss {loss.item():.4f}")
-            if step % 50 == 0:
-                print(f"Epoch {epoch} step {step} -- loss {total_loss/(step+1):.4f}  "
-                    f"persistence {total_p/(step+1):.4f}  ratio {total_loss/max(total_p,1e-8):.3f}")
-            
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
+        train_loss, train_p = total / n, total_p / n
+        history["train"].append(train_loss)
+        history["train_persistence"].append(train_p)
+        summary = f"Epoch {epoch} -- train: {train_loss:.4f} (persistence ratio {train_loss / train_p:.3f})"
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}")
+        if val_dataloader is not None:
+            val_loss, val_p = evaluate_network(model, val_dataloader, residual_std, device, desc=f"Epoch {epoch} val")
+            history["val"].append(val_loss)
+            history["val_persistence"].append(val_p)
+            summary += f" | val: {val_loss:.4f} (persistence ratio {val_loss / val_p:.3f})"
+        print(summary)
 
-    model.save_weights(f"{output_dir}/{experiment_name}/final_weights.pth")
+        if val_dataloader is not None and val_loss < best_val:
+            best_val = val_loss
+            model.save_weights(f"{out_dir}/best_weights.pth")
+            print(f"Epoch {epoch} -- new best val loss, saved best_weights.pth")
+
+        with open(f"{out_dir}/loss_history.pkl", "wb") as f:
+            pickle.dump(history, f)
+
+    model.save_weights(f"{out_dir}/final_weights.pth")
     return model

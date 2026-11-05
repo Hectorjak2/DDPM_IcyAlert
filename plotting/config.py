@@ -1,5 +1,7 @@
 from matplotlib import pyplot as plt
+from matplotlib.colors import to_rgb
 from cycler import cycler
+import numpy as np
 import os
 
 # LaTeX \textwidth of the thesis (448.13pt, 72.27pt per inch)
@@ -17,6 +19,10 @@ INK = "#3A3F47"     # text, ticks
 GRID = "#E3E6EA"    # grid lines
 MUTED = "#9AA1AB"   # spines, reference lines (use with linestyle=REF_LINESTYLE)
 REF_LINESTYLE = (0, (4, 3))
+
+def muted(color: str, amount: float = 0.45) -> tuple:
+    """A palette colour blended `amount` of the way to white, for large filled areas (bars, histograms)."""
+    return tuple((1 - amount) * np.array(to_rgb(color)) + amount)
 
 def savefig(fig, output_dir: str, name: str, width: float = TEXTWIDTH_IN, height: float = 4):
     fig.set_size_inches(width, height)

@@ -52,9 +52,13 @@ def to_data_range(x: torch.Tensor) -> torch.Tensor:
     return (x + 1.0) / 2.0
 
 class CARRA2(Dataset):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, ddpm: bool = True):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, ddpm: bool = True, field_stats: tuple[float, float] | None = None):
         """
         This class is a PyTorch Dataset for the CARRA2 dataset.
+
+        field_stats: (mean, std) to z-score with when ddpm=False, instead of this slice's own.
+            Validation and test sets must use the training set's values (and computing them
+            would read the whole slice for nothing).
         It allows for loading a specific variable, selecting a time slice.
         By default it will load the CARRA2-WEST area, but this can be changed by setting WEST to False.
 
@@ -112,10 +116,13 @@ class CARRA2(Dataset):
         )
 
         # Statistics over water (finite) pixels only; land is NaN and must not count.
-        water = self.da.where(np.isfinite(self.da))
-        self.mean, self.std = dask.compute(
-            water.mean(skipna=True), water.std(skipna=True)
-        )
+        if field_stats is not None:
+            self.mean, self.std = field_stats
+        else:
+            water = self.da.where(np.isfinite(self.da))
+            self.mean, self.std = dask.compute(
+                water.mean(skipna=True), water.std(skipna=True)
+            )
 
 
 
@@ -145,7 +152,7 @@ class CARRA2(Dataset):
 
 
 class CARRA2Forecast(CARRA2):
-    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, ddpm: bool = True, lead_months: int = 1):
+    def __init__(self, selected_variable: str, device: str, time_slice: slice | list[slice] | None = None, area: DatasetChoice = DatasetChoice.CARRA_WEST, batch_dim: bool = True, ddpm: bool = True, lead_months: int = 1, field_stats: tuple[float, float] | None = None):
         """
         A forecasting variant of CARRA2: each sample is a triplet of days one
         calendar *month* apart (k-1, k, k+1) -- e.g. 5 Sep, 5 Oct, 5 Nov --
@@ -166,7 +173,7 @@ class CARRA2Forecast(CARRA2):
         exist, so get_rollout has a ground truth at every lead. __getitem__
         still returns the one-month triplet.
         """
-        super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim, ddpm=ddpm)
+        super().__init__(selected_variable, device, time_slice=time_slice, area=area, batch_dim=batch_dim, ddpm=ddpm, field_stats=field_stats)
         self.lead_months = lead_months
 
         times = self.da.time.values

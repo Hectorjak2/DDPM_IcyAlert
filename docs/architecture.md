@@ -27,6 +27,7 @@
   - `get_device()` — returns a device string (`"cuda"`, `"mps"`, or `"cpu"`) based on availability.
   - `get_device_info()` — diagnostic info (VRAM, compute capability, etc.).
   - `device_diagnostics(device)` — prints device details.
+- **[utils/progress.py](../utils/progress.py)** — `progress()`: the tqdm bar both training loops use. Writes to stdout (titan.s splits .out/.err) and, when stdout is a file, refreshes only every 30 s so the log stays small.
 - **[utils/download_data.py](../utils/download_data.py)** — CDS (Climate Data Store) API client for downloading CARRA2 monthly data.
 - **[plotting/](../plotting/)** — All plotting code, split out of `utils/`. A regular package; run from the repo root so imports resolve as `plotting.*`.
   - [plotting/visualization.py](../plotting/visualization.py) — Sample plotting helpers (`visualize_sic_sample`, `visualize_fashion`, `plot_samples_grid`).
@@ -34,6 +35,8 @@
   - [plotting/schedules.py](../plotting/schedules.py) — `Schedule` spec (kind + parameters + label) for the noise-schedule figures [plotting/schedule_comparison.py](../plotting/schedule_comparison.py), [plotting/logsnr_distributions.py](../plotting/logsnr_distributions.py) and [plotting/forward_process.py](../plotting/forward_process.py). Each script lists its schedules in a settings block at the top instead of reading `DDPMConfig`, so one figure can show several variants (e.g. shifted cosines at different `cosine_shift_res`). Parameters left out fall back to `DDPMConfig`. Curves come from the same `models.ddpm.build_schedule` that training uses.
   - [plotting/ensemble_evaluation.py](../plotting/ensemble_evaluation.py) — Rank histogram and spread-skill for `ensemble_samples.pkl`, both over the marginal ice zone only: pixels with 0 < SIC < 1 on day k. Open water and pack ice were dropped (an "all water" panel existed earlier): there the truth ties with nearly every member, random tie-breaking spreads those pixels evenly over the ranks, and as they are most of the ocean they make the histogram near-flat by construction. The zone is selected on day k, not on the target, because conditioning on the observation biases the histogram. Ranks are per pixel, with the remaining ties broken at random (Hamill 2001); counting only members strictly below the truth would put every tie in rank 0 and fake a U shape. `spread_skill_map.pdf` shows spread, RMSE of the ensemble mean and their ratio per pixel (rows: cool and melt season, since the ice edge moves between them). Unlike the histogram, it uses all ocean pixels: the map shows where the ice is by itself, and a per-date day-k mask would give each pixel a different number of dates. The ratio is masked where spread < `MIN_MAP_SPREAD` (shown white; land is grey), because there both are ~0 and the ratio is noise. The same mask restricts the printed per-pixel spread–RMSE correlation, so the trivially predictable ocean does not inflate it. Spread and RMSE share one colour scale; the ratio uses a log norm centred at 1.
   - [plotting/model_comparison.py](../plotting/model_comparison.py) — `calibration` and `mse_by_lead` for two `samples.pkl` (e.g. UNet vs DDPM) in one figure each, with climatology in `mse_by_lead`. Persistence is left out of `mse_by_lead`: it grows far past both models with lead time, flattening them against the axis. Reuses the loaders and statistics of [plotting/evaluation.py](../plotting/evaluation.py), which stays the per-model evaluation. The climatology baseline comes from the first set, so both sets should be sampled on the same dates (same `sample_seed`); it warns otherwise and plots only the lead times both sets have.
+  - [plotting/data_split.py](../plotting/data_split.py) — Thesis bar of the train / validation / test split, read from the slices in config.py. Training and test are drawn shortened (`TRAINING_SCALE`, `TEST_SCALE`) so the validation label fits: not to scale.
+  - [plotting/data_distribution.py](../plotting/data_distribution.py) — Thesis histograms (log counts) of training SIC on day k and of the residual k+1 − k, with ±σ_r marked and boxed. No standardized-residual figure: dividing by σ_r only relabels the axis.
   - [plotting/region_map.py](../plotting/region_map.py) — Thesis map of the `CARRA_CROPPED` region, outlined from the edge pixels' latitude/longitude. `west.zarr` has no coordinates, so it reads them from the full-domain `dataset.zarr`. The CARRA2 grid is polar stereographic on a sphere (R = 6371 km), central meridian 30°W, true scale at 90°N, 2.5 km spacing. This was fitted to the stored lat/lon and matches to < 0.01%. Ground cell size is `2.5 km · (1 + sin φ)/2`, so cells are squares but smaller toward the south (≈2.29 km at the WEST southern edge).
   - [plotting/plot_config.py](../plotting/plot_config.py) — Thesis figure style (10pt serif, `usetex`) plus `savefig` and `TEXTWIDTH_IN` (thesis `\textwidth` = 448.13pt). Thesis figures are saved as vector PDFs to `figures/`; use the `/thesis-plot` skill. Needs a local LaTeX install, so keep it out of HPC code paths.
   - `finite_TEST.pt` / `finite_WEST.pt` — Saved land/water masks used by the visualization scripts (WEST-shaped vs TEST-shaped, so they are not interchangeable).
@@ -127,7 +130,8 @@ The field normalization of each model (DDPM `[-1, 1]`, UNet z-score) does not gi
 
 | key | σ_r SIC | σ_r DDPM | σ_r UNet | field std | frac zero |
 |---|---|---|---|---|---|
-| CARRA_CROPPED, 2000-01-01:2019-10-31 | 0.268 | 0.536 | 0.598 | 0.448 | 49% |
+| CARRA_CROPPED, 2000-01-01:2016-10-31 (current training slice) | 0.287 | 0.575 | 0.707 | 0.406 | 30% |
+| CARRA_CROPPED, 2000-01-01:2019-10-31 (before the validation split) | 0.268 | 0.536 | 0.598 | 0.448 | 49% |
 | CARRA_TEST, 2000-01-01:2004-10-31 (smoke) | 0.323 | 0.646 | 0.719 | 0.449 | 35% |
 
 **Why a cached json, not computed at init.** It needs a full read of the slice; the json is committed so HPC uses the same numbers without copying data. Entries are keyed by `(area, time_slice)`; a slice with no entry (every test set) gets `residual_scale = None`, and the models assert on it, so a test set's own statistics can never be used. Recompute with `python -m utils.residual_stats` (or `--area`) after changing a training slice. `σ_r` is not in config.py; `dump_config_snapshot` writes it to `config.txt`. **Checkpoints trained before this change (DDPM and UNet, including deep-ensemble members) are incompatible.**
@@ -222,6 +226,24 @@ Full self-attention at the 152×152 bottleneck is infeasible (see above), so `Si
 - **Output projection:** `proj_out` is zero-initialised, so the block is the identity at init and does not perturb the residual stream early in training.
 
 Checked against a naive per-row/per-column loop (max diff ~7e-7); with the GroupNorm bypassed, perturbing one pixel changes only its row and column.
+
+### Temporal Split: Train / Validation / Test
+
+**Location:** [config.py](../config.py) `TRAINING_SLICE`, `VALIDATION_SLICE`, `TEST_SLICE` (and `SMOKE_*`), `TrainConfig.validation_slice`; [main.py](../main.py) `run_ddpm` / `run_unet`; `DDPM.evaluate` in [models/ddpm.py](../models/ddpm.py), `evaluate_network` in [models/unet.py](../models/unet.py).
+
+| set | real | smoke (CARRA_TEST) |
+|---|---|---|
+| train | 2000-01-01 → 2016-10-31 | 2000-01-01 → 2003-10-31 |
+| validation | 2017-01-01 → 2019-10-31 | 2004-01-01 → 2004-10-31 |
+| test | 2020-01-01 → 2025-12-31 | 2005-01-01 → 2006-12-31 |
+
+- **Chronological hold-out, not k-fold.** Daily SIC is strongly autocorrelated, so random folds would put near-identical days on both sides; most folds would also train on years later than the ones they validate. K-fold would further multiply the training cost by K. Forward-chaining CV would address both, at K× the cost.
+- **The validation block is fixed for the whole run.** Rotating it per epoch would make it training data from the next epoch on.
+- **No extra gap code.** `CARRA2Forecast` only builds windows whose k−1 and k+1 lie inside its own slice, so the two-month gaps (Nov–Dec 2016, Nov–Dec 2019) mean no day is in two sets.
+- **Per-epoch validation loss.** After every epoch both models score the validation set with their training loss, without gradients and with dropout off (`model.eval()`). The DDPM draws t and the noise from `TrainConfig.validation_seed` inside `torch.random.fork_rng`, so every epoch is scored on the same draws and the training RNG stream is unchanged; DOSE is skipped when `not model.training`. The UNet is deterministic in eval mode. Both write `loss_history.pkl` after every epoch and `best_weights.pth` on a new best validation loss, next to `final_weights.pth`. `plotting/evaluation.py` (`--loss-only`) draws it; the UNet history also holds the persistence loss, drawn as a reference line.
+- **Validation is z-scored with the training statistics.** `CARRA2(field_stats=(mean, std))` sets them instead of computing the slice's own. Needed for the UNet (it only ever sees training statistics, as `UnetForecaster` does); the DDPM passes it only to skip a pass over the data.
+- **Train loss vs val loss are not measured identically**: train with dropout on and while the weights change, val at the end of the epoch with dropout off. A small val < train gap early on is expected.
+- **Changing a training slice changes its `residual_stats.json` key** — rerun `python -m utils.residual_stats` (and `--area CARRA_WEST` on HPC) and commit the json. Sampling reads σ_r (and the UNet's field mean/std) from the *current* `training_slice`, so weights trained on the old 2000–2019 slice must be sampled with that slice set back.
 
 ### Region Split: WEST vs. TEST
 

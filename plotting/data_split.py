@@ -8,12 +8,10 @@ say so in the caption.
 Run from the repo root:  python -m plotting.data_split
 """
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-from matplotlib.colors import to_rgb
 
 from config import TEST_SLICE, TRAINING_SLICE, VALIDATION_SLICE
-from plotting.config import savefig, TEXTWIDTH_IN, COLORS, INK
+from plotting.config import savefig, TEXTWIDTH_IN, COLORS, INK, muted
 
 MUTE = 0.45  # share of white blended into each palette colour
 # Drawn length of each segment relative to its true length.
@@ -21,13 +19,9 @@ TRAINING_SCALE = 0.5
 TEST_SCALE = 0.6
 
 
-def _muted(color: str) -> tuple:
-    return tuple((1 - MUTE) * np.array(to_rgb(color)) + MUTE)
-
-
-SPLITS = [("Training", TRAINING_SLICE, _muted(COLORS[0]), TRAINING_SCALE),
-          ("Validation", VALIDATION_SLICE, _muted(COLORS[3]), 1.0),
-          ("Test", TEST_SLICE, _muted(COLORS[1]), TEST_SCALE)]
+SPLITS = [("Training", TRAINING_SLICE, muted(COLORS[0], MUTE), TRAINING_SCALE),
+          ("Validation", VALIDATION_SLICE, muted(COLORS[3], MUTE), 1.0),
+          ("Test", TEST_SLICE, muted(COLORS[1], MUTE), TEST_SCALE)]
 
 
 def _year(date: str, end: bool = False) -> float:
