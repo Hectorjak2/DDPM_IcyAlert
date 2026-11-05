@@ -34,8 +34,8 @@ class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 1000
-    schedule: str = "shifted_cosine"
+    timesteps: int = 500
+    schedule: str = "cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 128
+    cosine_shift_res: int = 32
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
@@ -67,8 +67,14 @@ class DDPMConfig:
     # utils/residual_stats.json via CARRA2Forecast.residual_scale, and is written to config.txt.
 
 
-TRAINING_SLICE = slice("2000-01-01", "2019-10-31")
-SMOKE_TRAINING_SLICE = slice("2000-01-01", "2004-10-31")
+# Train / validation / test. Validation is a fixed block at the end of the old training slice
+# (2000-2019), so the test years stay untouched. CARRA2Forecast only builds windows whose k-1 and k+1
+# lie inside its own slice, so the two-month gap between slices means no day is shared.
+# Changing a training slice changes its residual-std key: rerun `python -m utils.residual_stats`.
+TRAINING_SLICE = slice("2000-01-01", "2016-10-31")
+VALIDATION_SLICE = slice("2017-01-01", "2019-10-31")
+SMOKE_TRAINING_SLICE = slice("2000-01-01", "2003-10-31")
+SMOKE_VALIDATION_SLICE = slice("2004-01-01", "2004-10-31")
 TEST_SLICE = slice("2020-01-01", "2025-12-31")
 SMOKE_TEST_SLICE = slice("2005-01-01", "2006-12-31")
 MELT_SEASON = [slice(f"{year}-04-01", f"{year}-09-30") for year in range(2020, 2025)]
@@ -89,16 +95,18 @@ class TrainConfig:
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
 
     #Forecasting and training settings: 
-    training_slice: slice = TRAINING_SLICE #Set to None if forecasting should be disabled
-    forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
+    training_slice: slice = SMOKE_TRAINING_SLICE #Set to None if forecasting should be disabled
+    forecasting_slice: slice = SMOKE_TEST_SLICE #Set to None if forecasting should be disabled
+    validation_slice: slice | None = SMOKE_VALIDATION_SLICE #Per-epoch validation loss; None disables it
+    validation_seed: int = 0  # fixes t and noise of the validation pass, so epochs are scored on the same draws
     
     #regular settings
-    dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-originalC-shift128"
-    batch_size: int = 4
-    epochs: int = 10
+    dataset = DatasetChoice.CARRA_TEST
+    experiment_name: str = f"{training_type}-titan"
+    batch_size: int = 8
+    epochs: int = 5
     lr: float = 3e-4
-    number_of_samples: int = 100
+    number_of_samples: int = 20
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True

@@ -52,6 +52,16 @@ def run_ddpm(dataset: DatasetChoice,
         shuffle=True,
     )
 
+    # Held-out validation block (TrainConfig.validation_slice), scored with the training loss after
+    # every epoch. Its own residual_scale is None (not cached), which is fine: the DDPM uses the
+    # training set's.
+    val_dataloader = None
+    if forecast_period and train_config.validation_slice is not None:
+        val_ds = CARRA2Forecast("siconc", device, area=dataset, time_slice=train_config.validation_slice, batch_dim=False)
+        val_dataloader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+        print(f"Train: {len(train_ds)} windows, last target {train_ds.get_dates(len(train_ds) - 1)[0]} | "
+              f"Val: {len(val_ds)} windows, first k-1 {val_ds.get_dates(0)[-1]}")
+
     # Build the DDPM model
     if forecast_period: 
         ddpm = ConditionalDDPM(
@@ -103,7 +113,7 @@ def run_ddpm(dataset: DatasetChoice,
 
     if train: 
         print("Training the model... ")
-        ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr, train_config=train_config)
+        ddpm.train(model, dataloader, experiment_name, device, timesteps, epochs=epochs, lr=lr, train_config=train_config, val_dataloader=val_dataloader)
         print("Training complete...")
         
     if sampling: 

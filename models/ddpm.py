@@ -1,5 +1,6 @@
 import math
 import os
+import pickle
 from random import sample
 
 import torch
@@ -249,20 +250,83 @@ class DDPM:
 
         return xt
 
-    def train(self, model, dataloader, experiment_name: str, device: str, timesteps: int, epochs: int, lr: float = 1e-3, train_config = TrainConfig()): 
+    # Number of timestep buckets for per-t loss reporting: how well the model does at high vs low t.
+    N_BUCKETS = 5
+
+    def _batch_loss(self, model, batch, device, timesteps: int):
+        """Loss of one dataloader batch at t ~ U(0, T), as in training. Returns (loss, t)."""
+        # Conditional datasets yield (context, month); others a bare tensor.
+        month = None
+        if isinstance(batch, (list, tuple)):
+            batch, month = batch
+            month = month.to(device)
+        batch = batch.to(device)
+        t = torch.randint(0, timesteps, (batch.shape[0],), device=device).long()
+        loss = (self.compute_loss(model, batch, t) if month is None
+                else self.compute_loss(model, batch, t, month))
+        return loss, t
+
+    @classmethod
+    def _bucket(cls, t: torch.Tensor, timesteps: int) -> int:
+        return min(int(t.float().mean().item() / timesteps * cls.N_BUCKETS), cls.N_BUCKETS - 1)
+
+    @classmethod
+    def _bucket_summary(cls, bucket_means: list, timesteps: int) -> str:
+        width = timesteps // cls.N_BUCKETS
+        return " | ".join(
+            f"t[{i * width}-{(i + 1) * width - 1}]: " + ("n/a" if m is None else f"{m:.4f}")
+            for i, m in enumerate(bucket_means)
+        )
+
+    @staticmethod
+    def _bucket_means(bucket_sum: list, bucket_count: list) -> list:
+        return [s / c if c else None for s, c in zip(bucket_sum, bucket_count)]
+
+    def evaluate(self, model, dataloader, device, timesteps: int, seed: int = 0) -> tuple[float, list]:
+        """Training loss on `dataloader` without gradients: (mean loss, mean per timestep bucket).
+
+        Dropout is off (eval mode, as when sampling), and so is DOSE (compute_loss checks
+        model.training). t and the noise are drawn from `seed` in a forked RNG, so every call
+        scores the same draws, which makes epochs comparable, and the training RNG stream is
+        left untouched.
+        """
+        was_training = model.training
+        model.eval()
+        device_type = torch.device(device).type
+        # fork_rng always forks the CPU generator; also fork the accelerator's if there is one.
+        fork_kwargs = {"devices": []} if device_type == "cpu" else {"device_type": device_type}
+        total, n = 0.0, 0
+        bucket_sum = [0.0] * self.N_BUCKETS
+        bucket_count = [0] * self.N_BUCKETS
+        with torch.no_grad(), torch.random.fork_rng(**fork_kwargs):
+            torch.manual_seed(seed)
+            for batch in dataloader:
+                loss, t = self._batch_loss(model, batch, device, timesteps)
+                # Weighted by batch size, so a short last batch does not count as a full one.
+                total += loss.item() * t.shape[0]
+                n += t.shape[0]
+                bucket = self._bucket(t, timesteps)
+                bucket_sum[bucket] += loss.item()
+                bucket_count[bucket] += 1
+        model.train(was_training)
+        return total / n, self._bucket_means(bucket_sum, bucket_count)
+
+    def train(self, model, dataloader, experiment_name: str, device: str, timesteps: int, epochs: int, lr: float = 1e-3, train_config = TrainConfig(), val_dataloader = None):
         self.output_name = f"{model._get_name()}_{dataloader.dataset.name}"
 
         n_params = sum(p.numel() for p in model.parameters())
         print(f"parameters: {n_params / 1e6:.1f}M")
-        os.makedirs(f"{train_config.output_dir}/{experiment_name}", exist_ok=True)
+        out_dir = f"{train_config.output_dir}/{experiment_name}"
+        os.makedirs(out_dir, exist_ok=True)
 
         model.to(device)
         model.train()
         optimizer = Adam(model.parameters(), lr=lr)
 
-        # Bucket boundaries for per-timestep loss reporting. It would be nice to be able to 
-        # see the loss in the t-intervals, so how well is it performing when t is high, low, etc.
-        n_buckets = 5
+        # Per-epoch losses, pickled after every epoch so a crashed run keeps its curve.
+        history = {"train": [], "val": [], "train_buckets": [], "val_buckets": []}
+        best_val = float("inf")
+
         # Every 2 epochs: with epochs=10 (~10h total, ~1h/epoch) the old "% 10" cadence
         # never fired inside range(epochs), so a crash lost the whole run with no
         # fallback. This trades a bit of I/O for an actual safety net.
@@ -273,28 +337,20 @@ class DDPM:
                                     optimizer=optimizer,
                                     epoch=epoch)
 
-            bucket_sum = [0.0] * n_buckets
-            bucket_count = [0] * n_buckets
+            bucket_sum = [0.0] * self.N_BUCKETS
+            bucket_count = [0] * self.N_BUCKETS
+            total, n = 0.0, 0
 
             for step, batch in enumerate(dataloader):
-                # Conditional datasets yield (context, month); others a bare tensor.
-                month = None
-                if isinstance(batch, (list, tuple)):
-                    batch, month = batch
-                    month = month.to(device)
-                batch = batch.to(device)
-
                 optimizer.zero_grad()
 
-                # sample t from U(0,T)
-                t = torch.randint(0, timesteps, (batch.shape[0],), device=device).long()
-
-                loss = (self.compute_loss(model, batch, t) if month is None
-                        else self.compute_loss(model, batch, t, month))
+                loss, t = self._batch_loss(model, batch, device, timesteps)
 
                 print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} ")#(t={t.tolist()})")
 
-                bucket = min(int(t.float().mean().item() / timesteps * n_buckets), n_buckets - 1)
+                total += loss.item() * t.shape[0]
+                n += t.shape[0]
+                bucket = self._bucket(t, timesteps)
                 bucket_sum[bucket] += loss.item()
                 bucket_count[bucket] += 1
 
@@ -302,15 +358,29 @@ class DDPM:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
 
-            width = timesteps // n_buckets
-            summary = " | ".join(
-                f"t[{i * width}-{(i + 1) * width - 1}]: "
-                + (f"{bucket_sum[i] / bucket_count[i]:.4f}" if bucket_count[i] else "n/a")
-                for i in range(n_buckets)
-            )
-            print(f"Epoch {epoch} loss by timestep bucket -- {summary}")
+            train_loss = total / n
+            train_buckets = self._bucket_means(bucket_sum, bucket_count)
+            history["train"].append(train_loss)
+            history["train_buckets"].append(train_buckets)
+            print(f"Epoch {epoch} train loss by timestep bucket -- {self._bucket_summary(train_buckets, timesteps)}")
 
-        model.save_weights(f"{train_config.output_dir}/{experiment_name}/final_weights.pth")
+            if val_dataloader is not None:
+                val_loss, val_buckets = self.evaluate(model, val_dataloader, device, timesteps, seed=train_config.validation_seed)
+                history["val"].append(val_loss)
+                history["val_buckets"].append(val_buckets)
+                print(f"Epoch {epoch} val loss by timestep bucket -- {self._bucket_summary(val_buckets, timesteps)}")
+                print(f"Epoch {epoch} -- train: {train_loss:.4f} | val: {val_loss:.4f}")
+                if val_loss < best_val:
+                    best_val = val_loss
+                    model.save_weights(f"{out_dir}/best_weights.pth")
+                    print(f"Epoch {epoch} -- new best val loss, saved best_weights.pth")
+            else:
+                print(f"Epoch {epoch} -- train: {train_loss:.4f}")
+
+            with open(f"{out_dir}/loss_history.pkl", "wb") as f:
+                pickle.dump(history, f)
+
+        model.save_weights(f"{out_dir}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
     def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, dose:int, residual_std: float, clamp_x0: bool = True, residual_context: bool = False, **kwargs):
@@ -327,7 +397,8 @@ class ConditionalDDPM(DDPM):
         self.clamp_x0 = clamp_x0  # see DDPMConfig.clamp_x0
         self.residual_context = residual_context
         # x_t + context (k, k-1, and optionally the residual) + land mask
-        self.in_channels = 1 + 2 + int(residual_context) + int(self.mask_channel is not None)
+        #xt, (k, k-1), optionally one less if residual context, land mask
+        self.in_channels = 1 + 2 - int(residual_context) + int(self.mask_channel is not None)
         self.forecast_period = forecast_period
         self.batch_size = batch_size
         self.unfolded = unfolded
@@ -341,7 +412,7 @@ class ConditionalDDPM(DDPM):
         if not self.residual_context:
             return context
         context_residual = ((context[:, 0] - context[:, 1]) / self.residual_std).unsqueeze(1)
-        return torch.cat([context_residual, context], dim=1)
+        return context_residual
 
     def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor): 
         """
@@ -367,7 +438,8 @@ class ConditionalDDPM(DDPM):
         xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only noising the residual
 
         #reconstructing the input to be [xt, k - (k-1)]
-        if self.dose and torch.rand(()).item() < self.dose: 
+        # DOSE only while training: the validation loss should measure the real task.
+        if self.dose and model.training and torch.rand(()).item() < self.dose:
             xtr = torch.randn_like(xt)
             input_X = torch.cat([xtr, selected_context], dim=1)
         else: 
