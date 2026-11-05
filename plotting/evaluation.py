@@ -15,8 +15,8 @@ Reads ``results/<run>/samples.pkl`` written by
 7. ``mean_residual``  -- mean residual k+1 - k per season, predicted (top) vs truth (bottom).
    Random-sign sample noise averages out, so this shows the model's systematic signal
    (has it learned the seasonal melt/growth?) and any one-sided bias.
-8. ``loss_history``   -- training vs validation loss per epoch, overall and per timestep
-   bucket, from the ``loss_history.pkl`` that ``DDPM.train`` writes next to the weights.
+8. ``loss_history``   -- training vs validation loss per epoch (mean over all timesteps), from
+   the ``loss_history.pkl`` that ``DDPM.train`` writes next to the weights.
    Skipped if the run has none. ``--loss-only`` draws just this one (no samples.pkl needed).
 
 Also prints a table of the per-sample MSE over water, overall and per season, next to
@@ -557,41 +557,22 @@ def load_loss_history(run: str | Path) -> tuple[Path, dict] | None:
 
 
 def plot_loss_history(history: dict, out_dir):
-    """Training vs validation loss per epoch: the epoch mean, then one panel per timestep bucket.
-
-    Each bucket is its own panel rather than a line in one shared plot, because the loss level
-    differs a lot between low and high t, and on a shared axis the low-t curves would flatten
-    against zero. Training and validation keep the same colour in every panel.
-    """
-    train_buckets = np.array(history["train_buckets"], dtype=np.float64)  # [epochs, buckets], None -> NaN
-    val_buckets = np.array(history["val_buckets"], dtype=np.float64) if history["val"] else None
-    n_buckets = train_buckets.shape[1]
-    timesteps = history.get("timesteps", 1000)  # pickles written before it was stored used T = 1000
-    width = timesteps // n_buckets
+    """Training vs validation loss per epoch, averaged over all timesteps."""
     epochs = np.arange(1, len(history["train"]) + 1)
 
-    panels = [("All timesteps", history["train"], history["val"] or None)]
-    panels += [(rf"$t \in [{i * width}, {(i + 1) * width - 1}]$", train_buckets[:, i],
-                None if val_buckets is None else val_buckets[:, i]) for i in range(n_buckets)]
+    fig, ax = plt.subplots()
+    ax.plot(epochs, history["train"], color=COLORS[0], marker=MARKERS[0], label="Training")
+    if history["val"]:
+        ax.plot(epochs, history["val"], color=COLORS[1], marker=MARKERS[1], label="Validation")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.set_xlabel("epoch")
+    # The truncated-SNR weight of ConditionalDDPM.compute_loss (not used with unfolded_loss).
+    # Too long for the y-axis at half width, so the formula is the title.
+    ax.set_title(r"$\min(\max(\mathrm{SNR}_t, 1), 5)\,\|\hat{x}_0 - x_0\|^2$")
+    ax.set_ylabel("loss")
+    ax.legend()
 
-    n_cols = 3
-    n_rows = -(-len(panels) // n_cols)
-    fig, axes = plt.subplots(n_rows, n_cols, sharex=True, squeeze=False)
-    for ax, (title, train, val) in zip(axes.flat, panels):
-        ax.plot(epochs, train, color=COLORS[0], marker=MARKERS[0], label="Training")
-        if val is not None:
-            ax.plot(epochs, val, color=COLORS[1], marker=MARKERS[1], label="Validation")
-        ax.set_title(title)
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    for ax in axes.flat[len(panels):]:
-        ax.set_visible(False)
-    for ax in axes[-1]:
-        ax.set_xlabel("epoch")
-    for ax in axes[:, 0]:
-        ax.set_ylabel("weighted loss")
-    axes[0, 0].legend()
-
-    savefig(fig, out_dir, "loss_history", width=TEXTWIDTH_IN, height=1.8 * n_rows + 0.3)
+    savefig(fig, out_dir, "loss_history", width=TEXTWIDTH_IN / 2, height=2.8)
     plt.close(fig)
 
 

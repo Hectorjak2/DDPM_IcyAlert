@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 32
+    cosine_shift_res: int = 16
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;

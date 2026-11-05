@@ -1,9 +1,11 @@
 import math
 import os
 import pickle
+import sys
 from random import sample
 
 import torch
+from tqdm import tqdm
 from torch.optim import Adam
 import torch.nn.functional as F
 from typing import Optional
@@ -282,7 +284,19 @@ class DDPM:
     def _bucket_means(bucket_sum: list, bucket_count: list) -> list:
         return [s / c if c else None for s, c in zip(bucket_sum, bucket_count)]
 
-    def evaluate(self, model, dataloader, device, timesteps: int, seed: int = 0) -> tuple[float, list]:
+    @staticmethod
+    def _progress(iterable, desc: str):
+        """Progress bar for one pass over a dataloader.
+
+        Written to stdout, not tqdm's default stderr, so it lands in the same log file as the
+        epoch summaries (titan.s splits .out and .err). In a log file every refresh is appended
+        rather than redrawn, so refresh only every 30 s there to keep the file small.
+        """
+        interactive = sys.stdout.isatty()
+        return tqdm(iterable, desc=desc, file=sys.stdout, dynamic_ncols=interactive,
+                    ncols=None if interactive else 100, mininterval=0.1 if interactive else 30)
+
+    def evaluate(self, model, dataloader, device, timesteps: int, seed: int = 0, desc: str = "val") -> tuple[float, list]:
         """Training loss on `dataloader` without gradients: (mean loss, mean per timestep bucket).
 
         Dropout is off (eval mode, as when sampling), and so is DOSE (compute_loss checks
@@ -300,7 +314,7 @@ class DDPM:
         bucket_count = [0] * self.N_BUCKETS
         with torch.no_grad(), torch.random.fork_rng(**fork_kwargs):
             torch.manual_seed(seed)
-            for batch in dataloader:
+            for batch in self._progress(dataloader, desc):
                 loss, t = self._batch_loss(model, batch, device, timesteps)
                 # Weighted by batch size, so a short last batch does not count as a full one.
                 total += loss.item() * t.shape[0]
@@ -342,15 +356,16 @@ class DDPM:
             bucket_count = [0] * self.N_BUCKETS
             total, n = 0.0, 0
 
-            for step, batch in enumerate(dataloader):
+            pbar = self._progress(dataloader, f"Epoch {epoch} train")
+            for batch in pbar:
                 optimizer.zero_grad()
 
                 loss, t = self._batch_loss(model, batch, device, timesteps)
 
-                print(f"Epoch: {epoch}, step: {step} -- Loss: {loss.item():.4f} ")#(t={t.tolist()})")
-
                 total += loss.item() * t.shape[0]
                 n += t.shape[0]
+                # Running epoch mean; refresh=False so it is shown at the bar's own refresh rate.
+                pbar.set_postfix(loss=f"{total / n:.4f}", refresh=False)
                 bucket = self._bucket(t, timesteps)
                 bucket_sum[bucket] += loss.item()
                 bucket_count[bucket] += 1
@@ -366,7 +381,8 @@ class DDPM:
             print(f"Epoch {epoch} train loss by timestep bucket -- {self._bucket_summary(train_buckets, timesteps)}")
 
             if val_dataloader is not None:
-                val_loss, val_buckets = self.evaluate(model, val_dataloader, device, timesteps, seed=train_config.validation_seed)
+                val_loss, val_buckets = self.evaluate(model, val_dataloader, device, timesteps,
+                                                      seed=train_config.validation_seed, desc=f"Epoch {epoch} val")
                 history["val"].append(val_loss)
                 history["val_buckets"].append(val_buckets)
                 print(f"Epoch {epoch} val loss by timestep bucket -- {self._bucket_summary(val_buckets, timesteps)}")
