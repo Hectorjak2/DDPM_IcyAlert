@@ -15,6 +15,9 @@ Reads ``results/<run>/samples.pkl`` written by
 7. ``mean_residual``  -- mean residual k+1 - k per season, predicted (top) vs truth (bottom).
    Random-sign sample noise averages out, so this shows the model's systematic signal
    (has it learned the seasonal melt/growth?) and any one-sided bias.
+8. ``loss_history``   -- training vs validation loss per epoch, overall and per timestep
+   bucket, from the ``loss_history.pkl`` that ``DDPM.train`` writes next to the weights.
+   Skipped if the run has none. ``--loss-only`` draws just this one (no samples.pkl needed).
 
 Also prints a table of the per-sample MSE over water, overall and per season, next to
 the persistence and climatology baselines (see ``models.climatology``).
@@ -35,9 +38,10 @@ import pandas as pd
 import torch
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
 
 from models.climatology import Climatology
-from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MUTED, REF_LINESTYLE
+from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
 from utils.dataloader import to_data_range
 
 # Sea-ice colormap: open water dark blue, full ice white, land grey.
@@ -532,8 +536,81 @@ def plot_mean_residual(data, out_dir):
     plt.close(fig)
 
 
+def load_loss_history(run: str | Path) -> tuple[Path, dict] | None:
+    """Find and load a run's loss_history.pkl, or None if it has none.
+
+    Accepts the pickle itself, a run directory, or a run name. DDPM.train writes it to
+    {output_dir}/{experiment_name}/ (results/), while samples.pkl may sit in samples_dir
+    (/work3 on HPC), so a samples directory also falls back to results/<its name>/.
+    """
+    run = Path(run)
+    if run.suffix == ".pkl" and run.name != "samples.pkl":
+        candidates = [run]
+    else:
+        run_dir = run.parent if run.suffix == ".pkl" else run
+        candidates = [run_dir / "loss_history.pkl", Path("results") / run_dir.name / "loss_history.pkl"]
+    for path in candidates:
+        if path.exists():
+            with open(path, "rb") as f:
+                return path.parent, pickle.load(f)
+    return None
+
+
+def plot_loss_history(history: dict, out_dir):
+    """Training vs validation loss per epoch: the epoch mean, then one panel per timestep bucket.
+
+    Each bucket is its own panel rather than a line in one shared plot, because the loss level
+    differs a lot between low and high t, and on a shared axis the low-t curves would flatten
+    against zero. Training and validation keep the same colour in every panel.
+    """
+    train_buckets = np.array(history["train_buckets"], dtype=np.float64)  # [epochs, buckets], None -> NaN
+    val_buckets = np.array(history["val_buckets"], dtype=np.float64) if history["val"] else None
+    n_buckets = train_buckets.shape[1]
+    timesteps = history.get("timesteps", 1000)  # pickles written before it was stored used T = 1000
+    width = timesteps // n_buckets
+    epochs = np.arange(1, len(history["train"]) + 1)
+
+    panels = [("All timesteps", history["train"], history["val"] or None)]
+    panels += [(rf"$t \in [{i * width}, {(i + 1) * width - 1}]$", train_buckets[:, i],
+                None if val_buckets is None else val_buckets[:, i]) for i in range(n_buckets)]
+
+    n_cols = 3
+    n_rows = -(-len(panels) // n_cols)
+    fig, axes = plt.subplots(n_rows, n_cols, sharex=True, squeeze=False)
+    for ax, (title, train, val) in zip(axes.flat, panels):
+        ax.plot(epochs, train, color=COLORS[0], marker=MARKERS[0], label="Training")
+        if val is not None:
+            ax.plot(epochs, val, color=COLORS[1], marker=MARKERS[1], label="Validation")
+        ax.set_title(title)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    for ax in axes.flat[len(panels):]:
+        ax.set_visible(False)
+    for ax in axes[-1]:
+        ax.set_xlabel("epoch")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("weighted loss")
+    axes[0, 0].legend()
+
+    savefig(fig, out_dir, "loss_history", width=TEXTWIDTH_IN, height=1.8 * n_rows + 0.3)
+    plt.close(fig)
+
+
+def make_loss_history(run, out_dir=None):
+    """Draw loss_history for `run` into out_dir (default: next to the pickle), if it has one."""
+    found = load_loss_history(run)
+    if found is None:
+        print(f"No loss_history.pkl for {run} -- skipping loss_history.")
+        return
+    history_dir, history = found
+    out_dir = history_dir if out_dir is None else out_dir
+    plot_loss_history(history, out_dir)
+    print(f"Wrote {out_dir}/loss_history.pdf")
+
+
 def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None, lead: int = 1):
     run_dir, leads = load_leads(path)
+    # Training history does not depend on --lead, so it goes next to the samples like calibration.
+    make_loss_history(run_dir, run_dir)
     data = leads[lead - 1]
     out_dir = run_dir
     if lead > 1:
@@ -572,6 +649,11 @@ if __name__ == "__main__":
                         help="samples shown in ice_edge_error (default: first Mar and Sep)")
     parser.add_argument("--lead", type=int, default=1,
                         help="for a rollout, score the forecast of k+lead (figures go to lead<lead>/)")
+    parser.add_argument("--loss-only", action="store_true",
+                        help="only draw loss_history (run name, run dir or loss_history.pkl; no samples.pkl needed)")
     args = parser.parse_args()
-    make_all(args.run, row_index=args.row_index, grid_indices=args.grid_indices,
-             edge_indices=args.edge_indices, lead=args.lead)
+    if args.loss_only:
+        make_loss_history(args.run)
+    else:
+        make_all(args.run, row_index=args.row_index, grid_indices=args.grid_indices,
+                 edge_indices=args.edge_indices, lead=args.lead)

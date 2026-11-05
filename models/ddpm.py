@@ -324,7 +324,8 @@ class DDPM:
         optimizer = Adam(model.parameters(), lr=lr)
 
         # Per-epoch losses, pickled after every epoch so a crashed run keeps its curve.
-        history = {"train": [], "val": [], "train_buckets": [], "val_buckets": []}
+        # timesteps is kept so plotting can label the buckets (plotting/evaluation.py, loss_history).
+        history = {"train": [], "val": [], "train_buckets": [], "val_buckets": [], "timesteps": timesteps}
         best_val = float("inf")
 
         # Every 2 epochs: with epochs=10 (~10h total, ~1h/epoch) the old "% 10" cadence

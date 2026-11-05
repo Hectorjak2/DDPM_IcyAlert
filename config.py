@@ -35,7 +35,7 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 500
-    schedule: str = "cosine"
+    schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
