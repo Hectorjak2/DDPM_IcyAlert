@@ -34,7 +34,7 @@ class DDPMConfig:
     """
     DDPM diffusion process configuration.
     """
-    timesteps: int = 500
+    timesteps: int = 1000
     schedule: str = "shifted_cosine"
 
     # Only used when schedule == "linear".
@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 16
+    cosine_shift_res: int = 64
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
@@ -95,18 +95,18 @@ class TrainConfig:
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
 
     #Forecasting and training settings: 
-    training_slice: slice = SMOKE_TRAINING_SLICE #Set to None if forecasting should be disabled
-    forecasting_slice: slice = SMOKE_TEST_SLICE #Set to None if forecasting should be disabled
-    validation_slice: slice | None = SMOKE_VALIDATION_SLICE #Per-epoch validation loss; None disables it
+    training_slice: slice = TRAINING_SLICE #Set to None if forecasting should be disabled
+    forecasting_slice: slice = TEST_SLICE #Set to None if forecasting should be disabled
+    validation_slice: slice | None = VALIDATION_SLICE #Per-epoch validation loss; None disables it
     validation_seed: int = 0  # fixes t and noise of the validation pass, so epochs are scored on the same draws
     
     #regular settings
-    dataset = DatasetChoice.CARRA_TEST
-    experiment_name: str = f"{training_type}-titan"
-    batch_size: int = 8
-    epochs: int = 5
+    dataset = DatasetChoice.CARRA_CROPPED
+    experiment_name: str = f"{training_type}-titanCropped"
+    batch_size: int = 4
+    epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 20
+    number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
