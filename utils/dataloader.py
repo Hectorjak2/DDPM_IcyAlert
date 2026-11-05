@@ -21,7 +21,7 @@ CARRA_TEST_MASK = None
 CARRA2_DATA_ROOT = os.environ.get("CARRA2_DATA_ROOT", "data/CARRA2_DAILY")
 
 # CARRA_CROPPED window in WEST-local coordinates (896x896)
-CROPPED_Y = slice(720, 1116)
+CROPPED_Y = slice(220, 1116)
 CROPPED_X = slice(0, 896)
 
 # Residual statistics written by utils/residual_stats.py. Kept in the repo, not under
