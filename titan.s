@@ -13,7 +13,7 @@
 ## Usage: ./titan.s <name>  (self-submits with job name and output file set to <name>)
 if [[ -z $SLURM_JOB_ID ]]; then
   NAME=${1:-hcjtest}
-  exec sbatch --job-name="$NAME" --output="$NAME-%J.out" "$0" "$@"
+  exec sbatch --job-name="$NAME" --output="$NAME-%J.out" --error="$NAME-%J.err" "$0" "$@"
 fi
 
 ## INFO
@@ -33,6 +33,7 @@ source ~/.bashrc
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate icyalert
 python --version
-python -m main
+## -u: unbuffered, so prints reach the .out file as they happen (otherwise held in an 8 KB buffer)
+python -u -m main
 
 echo "Done: $(date +%F-%R:%S)"
