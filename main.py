@@ -80,6 +80,10 @@ def run_ddpm(dataset: DatasetChoice,
                 residual_std=train_ds.residual_scale,
                 clamp_x0=ddpm_config.clamp_x0,
                 residual_context=ddpm_config.residual_context,
+                sampler=ddpm_config.sampler,
+                ddim_steps=ddpm_config.ddim_steps,
+                ddim_eta=ddpm_config.ddim_eta,
+                input_perturbation=train_config.input_perturbation,
             )
     else: 
         ddpm = DDPM(

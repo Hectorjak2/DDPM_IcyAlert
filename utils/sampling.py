@@ -184,6 +184,9 @@ def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfi
         residual_std=load_residual_stats(train_cfg.dataset, TrainConfig().training_slice).get("std_ddpm"),
         clamp_x0=ddpm_cfg.clamp_x0,
         residual_context=ddpm_cfg.residual_context,
+        sampler=ddpm_cfg.sampler,
+        ddim_steps=ddpm_cfg.ddim_steps,
+        ddim_eta=ddpm_cfg.ddim_eta,
     )
     model = build_unet(ddpm.in_channels, weights, unet_cfg)
     # Dropout off: here the spread comes from the reverse process, not the network.

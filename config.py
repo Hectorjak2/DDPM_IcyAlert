@@ -57,6 +57,17 @@ class DDPMConfig:
     # The final reconstruction is clamped to [-1, 1] either way.
     clamp_x0: bool = False
 
+    # Reverse process used by ConditionalDDPM.sample. Sampling only: the same weights work with
+    # either, so no retraining. "ddpm": ancestral sampling over all `timesteps` steps (Ho et al.).
+    # "ddim": Song et al. (2021) over `ddim_steps` evenly spaced steps of the same schedule; fewer
+    # steps means ~timesteps/ddim_steps x faster and fewer steps for errors to compound over
+    # (exposure bias, the drift toward melt seen in cool-season chains).
+    sampler: str = "ddpm"
+    ddim_steps: int = 50
+    # Noise injected per DDIM step. 0: deterministic given the initial noise (ensemble spread
+    # comes only from x_T). 1: the DDPM posterior variance at the coarser steps.
+    ddim_eta: float = 0.0
+
     # Conditioning of ConditionalDDPM. False: context is [k, k-1], network input
     # [x_t, k, k-1, mask] (4 channels). True: the standardized residual (k - (k-1)) / residual_std
     # is prepended, input [x_t, k-(k-1), k, k-1, mask] (5 channels). The UNet's in_channels follows
@@ -90,9 +101,14 @@ class TrainConfig:
     training_type: str = "ddpm" #"unet", "ddpm"
 
     #DDPM specific
-    analysis_sampling: bool = True
+    analysis_sampling: bool = False
     unfolded_loss: bool = False
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
+    # Input perturbation (Ning et al. 2023, DDPM-IP): x_t is built from noise + gamma * xi, xi ~ N(0, I),
+    # so the network also sees x_t slightly off the forward process, as it does in the sampling chain
+    # (exposure bias: the drift toward melt in cool-season samples). The target is unchanged. Training
+    # only, so the validation loss stays on clean inputs. None disables it; the paper uses 0.1.
+    input_perturbation: float | None = 0.1
 
     #Forecasting and training settings: 
     training_slice: slice = TRAINING_SLICE #Set to None if forecasting should be disabled
@@ -102,16 +118,16 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-titancropped_analysis"
+    experiment_name: str = f"{training_type}-titanfull-shif64-ip"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 20
+    number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = False 
-    weights: str = "ddpm-titanCropped/final_weights.pth"
+    training: bool = True 
+    weights: str = None#"ddpm-titanCropped/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

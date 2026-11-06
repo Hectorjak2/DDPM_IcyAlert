@@ -388,15 +388,27 @@ class DDPM:
         model.save_weights(f"{out_dir}/final_weights.pth")
 
 class ConditionalDDPM(DDPM):
-    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, dose:int, residual_std: float, clamp_x0: bool = True, residual_context: bool = False, **kwargs):
+    SAMPLERS = ("ddpm", "ddim")
+
+    def __init__(self, *args, forecast_period: slice, batch_size: int, unfolded:bool, dose:int, residual_std: float, clamp_x0: bool = True, residual_context: bool = False,
+                 sampler: str = "ddpm", ddim_steps: int = 50, ddim_eta: float = 0.0,
+                 input_perturbation: float | None = None, **kwargs):
         """
         residual_std: std of the residual k+1 - k in model units [-1, 1] over the training set
             (CARRA2Forecast.residual_scale, from utils/residual_stats.json). Both residuals, the
             diffused target and the context channel, are divided by it, so the diffusion runs on
             unit-scale data as the noise schedule assumes.
         residual_context: see DDPMConfig.residual_context.
+        sampler, ddim_steps, ddim_eta: see DDPMConfig.sampler.
+        input_perturbation: gamma of DDPM-IP, see TrainConfig.input_perturbation.
         """
         super().__init__(*args, **kwargs)
+        if sampler not in self.SAMPLERS:
+            raise ValueError(f"unknown sampler {sampler!r}; expected one of {self.SAMPLERS}")
+        self.sampler = sampler
+        self.ddim_steps = ddim_steps
+        self.ddim_eta = ddim_eta
+        self.input_perturbation = input_perturbation
         assert residual_std is not None, "no residual std for this training set; run python -m utils.residual_stats"
         self.residual_std = residual_std
         self.clamp_x0 = clamp_x0  # see DDPMConfig.clamp_x0
@@ -440,6 +452,11 @@ class ConditionalDDPM(DDPM):
 
         # Sample x_t using the forward diffusion process, keeping the noise target
         noise = torch.randn_like(x0_residual.unsqueeze(1))
+        # Input perturbation (TrainConfig.input_perturbation): x_t from slightly perturbed noise, so the
+        # network learns to recover x_0 from the off-process x_t the sampling chain produces. Training
+        # only, like DOSE. The target is x_0, so the perturbed noise is never a target.
+        if self.input_perturbation and model.training:
+            noise = noise + self.input_perturbation * torch.randn_like(noise)
         xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only noising the residual
 
         #reconstructing the input to be [xt, k - (k-1)]
@@ -504,24 +521,50 @@ class ConditionalDDPM(DDPM):
         z = torch.randn_like(x[:,0].unsqueeze(1)) if t[0] > 0 else torch.zeros_like(x[:,0].unsqueeze(1))
 
         #Reshape
-        alphas_bar_t = self.alphas_bar[t].view(-1, 1, 1, 1)
         coef_x0 = self.posterior_mean_coef_x0[t].view(-1, 1, 1, 1)
         coef_xt = self.posterior_mean_coef_xt[t].view(-1, 1, 1, 1)
         variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
 
-        # Recover x_0 from the predicted noise and clamp it to the data range
-        predicted_x0_residual = model(self.model_input(x), t, month)
-        k = base
-        #x0_pred = (x[:,0].unsqueeze(1) - torch.sqrt(1 - alphas_bar_t) * predicted_noise) / torch.sqrt(alphas_bar_t)
-        s = self.residual_std
-        if self.clamp_x0:
-            predicted_x0_residual = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s)
+        predicted_x0_residual = self.predict_x0(model, x, t, month, base)
 
         # Posterior mean of q(x_{t-1} | x_t, x_0), plus noise
         mean = coef_x0 * predicted_x0_residual + coef_xt * x[:,0].unsqueeze(1)
         xt = mean + torch.sqrt(variance_t) * z
 
         return xt
+
+    def predict_x0(self, model, x, t, month, base: torch.Tensor) -> torch.Tensor:
+        """The network's standardized residual x_0, clamped (DDPMConfig.clamp_x0) so that
+        base + residual_std * x_0 stays in [-1, 1]. x and base as in p_sample."""
+        predicted_x0_residual = model(self.model_input(x), t, month)
+        if self.clamp_x0:
+            k, s = base, self.residual_std
+            predicted_x0_residual = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s)
+        return predicted_x0_residual
+
+    def ddim_timesteps(self) -> list[int]:
+        """Descending DDIM steps: ddim_steps evenly spaced values from T-1 to 0, both included,
+        so the chain starts at the same noise level as DDPM and ends on the t=0 prediction."""
+        steps = torch.linspace(self.timesteps - 1, 0, min(self.ddim_steps, self.timesteps)).round().long()
+        return list(dict.fromkeys(steps.tolist()))  # drop duplicates from rounding, keep order
+
+    @torch.no_grad()
+    def ddim_step(self, model, x, t, t_prev: int, month, base: torch.Tensor):
+        """
+        One DDIM step x_t -> x_{t_prev} (Song et al. 2021, eq. 12), t_prev < t, or t_prev = -1
+        for the final step, where alpha_bar = 1 and the result is the x_0 prediction itself.
+        x, base as in p_sample.
+        """
+        xt = x[:, 0:1]
+        x0 = self.predict_x0(model, x, t, month, base)
+        ab_t = self.alphas_bar[t].view(-1, 1, 1, 1)
+        ab_prev = self.alphas_bar[t_prev] if t_prev >= 0 else torch.ones((), device=xt.device)
+
+        # The noise implied by x_t and the (clamped) x_0, so the two stay consistent
+        eps = (xt - ab_t.sqrt() * x0) / (1.0 - ab_t).sqrt()
+        sigma = self.ddim_eta * ((1.0 - ab_prev) / (1.0 - ab_t) * (1.0 - ab_t / ab_prev)).sqrt()
+        z = torch.randn_like(xt) if t_prev >= 0 and self.ddim_eta > 0 else torch.zeros_like(xt)
+        return ab_prev.sqrt() * x0 + (1.0 - ab_prev - sigma ** 2).clamp(min=0.0).sqrt() * eps + sigma * z
 
     @torch.no_grad()
     def sample(self, context:torch.Tensor, month: int, model, target: Optional[torch.Tensor] = None,
@@ -550,12 +593,18 @@ class ConditionalDDPM(DDPM):
 
         xt = torch.randn((1, 1, height, width), device=self.device)
         month_tensor = torch.tensor([month], device=self.device).long()
-        for t in reversed(range(self.timesteps)):
+        # DDPM visits every t; DDIM a strided subset, each step jumping to the next one in the list
+        steps = list(reversed(range(self.timesteps))) if self.sampler == "ddpm" else self.ddim_timesteps()
+        for i, t in enumerate(steps):
             t_tensor = torch.tensor([t], device=self.device).long()
             # Re-assemble [xt, k - (k-1)] each step: the context channel stays fixed,
             # but xt must be the latest denoised estimate, not the initial noise.
             input_x = torch.cat([xt, selected_context], dim=1)
-            xt = self.p_sample(model, input_x, t_tensor, month_tensor, base)
+            if self.sampler == "ddpm":
+                xt = self.p_sample(model, input_x, t_tensor, month_tensor, base)
+            else:
+                t_prev = steps[i + 1] if i + 1 < len(steps) else -1
+                xt = self.ddim_step(model, input_x, t_tensor, t_prev, month_tensor, base)
 
             tmp_rec = base + self.residual_std * xt #temporary reconstruction for loss
             if target is not None: 
