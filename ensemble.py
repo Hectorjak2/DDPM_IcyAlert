@@ -114,7 +114,7 @@ if __name__ == "__main__":
                         help="train this ensemble member; default is the first one not trained or running")
     args = parser.parse_args()
 
-    train_ensemble(args.seed)
-    train_ensemble(args.seed)
-    train_ensemble(args.seed)    
+    train_ensemble(3)
+    train_ensemble(4)
+    train_ensemble(5)    
     #sample_ensemble(EnsembleConfig(), TrainConfig(), UnetConfig(), DDPMConfig())
