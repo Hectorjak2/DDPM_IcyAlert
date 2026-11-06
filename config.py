@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 64
+    cosine_shift_res: int = 128
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
@@ -62,11 +62,11 @@ class DDPMConfig:
     # "ddim": Song et al. (2021) over `ddim_steps` evenly spaced steps of the same schedule; fewer
     # steps means ~timesteps/ddim_steps x faster and fewer steps for errors to compound over
     # (exposure bias, the drift toward melt seen in cool-season chains).
-    sampler: str = "ddim"
+    sampler: str = "ddpm"
     ddim_steps: int = 50
     # Noise injected per DDIM step. 0: deterministic given the initial noise (ensemble spread
     # comes only from x_T). 1: the DDPM posterior variance at the coarser steps.
-    ddim_eta: float = 1
+    ddim_eta: float = 0
 
     # Conditioning of ConditionalDDPM. False: context is [k, k-1], network input
     # [x_t, k, k-1, mask] (4 channels). True: the standardized residual (k - (k-1)) / residual_std
@@ -118,16 +118,16 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-titanfull-eta1ddim"
+    experiment_name: str = f"ddpm-titanfull-shif128-ip"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 20
+    number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = False 
-    weights: str = "ddpm-titanfull-shif64/final_weights.pth"
+    training: bool = True 
+    weights: str = None#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

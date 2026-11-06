@@ -5,7 +5,7 @@ unet_conf = UnetConfig()
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
 
-train_conf.experiment_name = "ddpm-titanfull-shif128"
+train_conf.experiment_name = "ddpm-titanfull-shif128-ip"
 ddpm_conf.cosine_shift_res = 128
 
 model, ddpm, train_ds = run_ddpm(
@@ -24,7 +24,7 @@ model, ddpm, train_ds = run_ddpm(
             unet_config=unet_conf
         )
 
-train_conf.experiment_name = "ddpm-titanfull-shif256"
+train_conf.experiment_name = "ddpm-titanfull-shif256-ip"
 ddpm_conf.cosine_shift_res = 256
 
 model, ddpm, train_ds = run_ddpm(
