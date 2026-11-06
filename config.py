@@ -90,7 +90,7 @@ class TrainConfig:
     training_type: str = "ddpm" #"unet", "ddpm"
 
     #DDPM specific
-    analysis_sampling: bool = False
+    analysis_sampling: bool = True
     unfolded_loss: bool = False
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
 
@@ -102,16 +102,16 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"{training_type}-titanfull-shif64lr"
+    experiment_name: str = f"{training_type}-titancropped_analysis"
     batch_size: int = 4
     epochs: int = 10
-    lr: float = 1e-3
-    number_of_samples: int = 100
+    lr: float = 3e-4
+    number_of_samples: int = 20
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = True 
-    weights: str = None#"ddpm-originalC/final_weights.pth"
+    training: bool = False 
+    weights: str = "ddpm-titanCropped/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
