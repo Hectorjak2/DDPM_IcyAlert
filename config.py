@@ -98,7 +98,7 @@ class TrainConfig:
     Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "ddpm" #"unet", "ddpm"
+    training_type: str = "unet" #"unet", "ddpm"
 
     #DDPM specific
     analysis_sampling: bool = False
@@ -118,7 +118,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"ddpm-titanfull-shif128-ip"
+    experiment_name: str = f"member3-unet"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -126,8 +126,8 @@ class TrainConfig:
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = True 
-    weights: str = None#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    training: bool = False 
+    weights: str = "results/ensembles/member_03/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
