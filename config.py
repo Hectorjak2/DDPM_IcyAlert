@@ -62,7 +62,7 @@ class DDPMConfig:
     # "ddim": Song et al. (2021) over `ddim_steps` evenly spaced steps of the same schedule; fewer
     # steps means ~timesteps/ddim_steps x faster and fewer steps for errors to compound over
     # (exposure bias, the drift toward melt seen in cool-season chains).
-    sampler: str = "ddpm"
+    sampler: str = "ddim"
     ddim_steps: int = 50
     # Noise injected per DDIM step. 0: deterministic given the initial noise (ensemble spread
     # comes only from x_T). 1: the DDPM posterior variance at the coarser steps.
@@ -98,7 +98,7 @@ class TrainConfig:
     Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "unet" #"unet", "ddpm"
+    training_type: str = "ddpm" #"unet", "ddpm"
 
     #DDPM specific
     analysis_sampling: bool = False
@@ -118,7 +118,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"member3-unet"
+    experiment_name: str = f"ddim-titanfull-shif128-ip"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -127,7 +127,7 @@ class TrainConfig:
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = False 
-    weights: str = "results/ensembles/member_03/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    weights: str = "results/ddpm-titanfull-shif128-ip/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
