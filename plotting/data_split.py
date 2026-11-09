@@ -20,7 +20,7 @@ TEST_SCALE = 0.6
 
 
 SPLITS = [("Training", TRAINING_SLICE, muted(COLORS[0], MUTE), TRAINING_SCALE),
-          ("Validation", VALIDATION_SLICE, muted(COLORS[3], MUTE), 1.0),
+          ("Validation", VALIDATION_SLICE, muted(COLORS[-1], MUTE), 1.0),
           ("Test", TEST_SLICE, muted(COLORS[1], MUTE), TEST_SCALE)]
 
 

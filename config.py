@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 128
+    cosine_shift_res: int = 32
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
@@ -62,7 +62,7 @@ class DDPMConfig:
     # "ddim": Song et al. (2021) over `ddim_steps` evenly spaced steps of the same schedule; fewer
     # steps means ~timesteps/ddim_steps x faster and fewer steps for errors to compound over
     # (exposure bias, the drift toward melt seen in cool-season chains).
-    sampler: str = "ddim"
+    sampler: str = "ddpm"
     ddim_steps: int = 50
     # Noise injected per DDIM step. 0: deterministic given the initial noise (ensemble spread
     # comes only from x_T). 1: the DDPM posterior variance at the coarser steps.
@@ -118,16 +118,16 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"ddim-titanfull-shif128-ip"
+    experiment_name: str = f"ddpm-titanfull-shif32-ip"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
-    lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
+    lead_months: int = 6  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = False 
-    weights: str = "results/ddpm-titanfull-shif128-ip/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    training: bool = True 
+    weights: str = None#"results/ensembles/member_0/best_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
@@ -143,5 +143,5 @@ class EnsembleConfig:
     method: str = "deep" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
     weights: str = "results/ddpm-rescropped-shif70/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
-    n_members: int = 10
-    experiment_name: str = f"{method}-unet-ensemble"
+    n_members: int = 8
+    experiment_name: str = f"{method}-unet-titan-ensemble"

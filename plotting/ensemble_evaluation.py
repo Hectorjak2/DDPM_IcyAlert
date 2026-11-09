@@ -19,11 +19,9 @@ Also prints the spread-skill pair per season: mean ensemble spread next to the R
 ensemble mean, which should be about equal for a calibrated ensemble.
 
 ``spread_skill_map.pdf`` shows the same pair per pixel, one row per season: spread and RMSE
-over the season's dates on a shared colour scale, and their ratio (log scale, 1 =
-calibrated). Over all ocean pixels, as the map itself shows where the ice is; the ratio is
-left out where the spread is below MIN_MAP_SPREAD (open water, pack ice). Spread and RMSE
-lining up says the ensemble knows *where* it is uncertain, the ratio whether it knows *how
-much*. The per-pixel correlation of spread and RMSE is printed alongside.
+over the season's dates on a shared colour scale. Over all ocean pixels, as the map itself
+shows where the ice is. Spread and RMSE lining up says the ensemble knows *where* it is
+uncertain. The per-pixel correlation of spread and RMSE is printed alongside.
 
 Run from the repo root:  python -m plotting.ensemble_evaluation <run_name | path/to/ensemble_samples.pkl> [--lead L]
 """
@@ -34,26 +32,19 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import ListedColormap, LogNorm
 
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MUTED, REF_LINESTYLE
 from plotting.evaluation import SEASONS, _as_data_range, _clean_image_axis
 
 TIE_SEED = 0  # fixes the random tie-breaking, so the figure is reproducible
 
-# Spread-skill maps. Below this spread (open water, pack ice) spread and RMSE are both ~0 and
-# their ratio is noise, so the ratio map leaves those pixels out.
+# Spread-skill maps. Below this spread (open water, pack ice) spread and RMSE are both ~0, so
+# the per-pixel correlation leaves those pixels out.
 MIN_MAP_SPREAD = 0.01
-RATIO_LIMIT = 4  # ratio colour scale runs from 1/RATIO_LIMIT to RATIO_LIMIT, log, centred at 1
 LAND_COLOR = "lightgray"  # as SIC_CMAP in plotting.evaluation
 
 SPREAD_CMAP = plt.cm.viridis.copy()
 SPREAD_CMAP.set_bad(LAND_COLOR)
-RATIO_CMAP = plt.cm.RdBu_r.copy()
-RATIO_CMAP.set_bad(alpha=0)  # transparent, so the background layer shows land vs masked ocean
-# Background of the ratio map: masked ocean white, land grey.
-BACKGROUND_CMAP = ListedColormap(["white"])
-BACKGROUND_CMAP.set_bad(LAND_COLOR)
 
 
 def load_ensemble(path: str | Path, lead: int = 1):
@@ -170,15 +161,12 @@ def plot_rank_histogram(n_members, stats, out_dir, name):
 
 
 def spread_skill_maps(data):
-    """Per season ('cool', 'melt'): per-pixel spread, RMSE of the ensemble mean and their
-    ratio over the dates of that season, each [H, W] with land NaN.
+    """Per season ('cool', 'melt'): per-pixel spread and RMSE of the ensemble mean over the
+    dates of that season, each [H, W] with land NaN.
 
     Over all ocean pixels rather than the day-k marginal ice zone: the map itself shows where
-    the ice is, and a per-date mask would give each pixel a different number of dates. The
-    ratio is divided by sqrt((M+1)/M) as in print_spread_skill, so 1 = calibrated, and is NaN
-    where the spread is below MIN_MAP_SPREAD.
+    the ice is, and a per-date mask would give each pixel a different number of dates.
     """
-    n_members = data["members"][0].shape[0]
     shape = data["targets"][0].shape
     sums = {season: {"var": np.zeros(shape), "se": np.zeros(shape), "n": np.zeros(shape)}
             for season in SEASONS}
@@ -191,16 +179,12 @@ def spread_skill_maps(data):
         s["se"][water] += ((m.mean(axis=0) - target) ** 2)[water]
         s["n"] += water
 
-    factor = np.sqrt((n_members + 1) / n_members)
     maps = {}
     for season, s in sums.items():
         if not s["n"].any():
             continue
-        with np.errstate(invalid="ignore", divide="ignore"):  # land: 0 / 0
-            spread = np.sqrt(s["var"] / s["n"])
-            rmse = np.sqrt(s["se"] / s["n"])
-            ratio = np.where(spread >= MIN_MAP_SPREAD, rmse / spread / factor, np.nan)
-        maps[season] = {"spread": spread, "rmse": rmse, "ratio": ratio}
+        with np.errstate(invalid="ignore"):  # land: 0 / 0
+            maps[season] = {"spread": np.sqrt(s["var"] / s["n"]), "rmse": np.sqrt(s["se"] / s["n"])}
     return maps
 
 
@@ -217,44 +201,32 @@ def print_map_correlation(maps):
 
 
 def plot_spread_skill_map(maps, out_dir, name):
-    """One row per season: spread and RMSE on a shared colour scale, and their ratio
-    (red: RMSE > spread, overconfident; blue: underconfident; white: spread < MIN_MAP_SPREAD)."""
+    """One row per season: spread and RMSE on a shared colour scale."""
     # Shared scale, so equal colours are equal SIC errors in both maps and both seasons.
     vmax = np.nanpercentile(np.concatenate([m[k].ravel() for m in maps.values()
                                             for k in ("spread", "rmse")]), 99)
-    ratio_norm = LogNorm(1 / RATIO_LIMIT, RATIO_LIMIT)
 
     n = len(maps)
     fig = plt.figure()
-    # Colorbars horizontal below the maps: vertical ones between the columns would widen every
-    # gap, as tight_layout spaces all columns alike.
-    gs = fig.add_gridspec(n + 1, 3, height_ratios=[1] * n + [0.05])
-    titles = ("spread", "RMSE", r"RMSE / spread$^*$")
+    # Colorbar horizontal below the maps: a vertical one beside them would widen the gap, as
+    # tight_layout spaces all columns alike.
+    gs = fig.add_gridspec(n + 1, 2, height_ratios=[1] * n + [0.05])
+    titles = ("spread", "RMSE")
     for row, (season, m) in enumerate(maps.items()):
-        axes = [fig.add_subplot(gs[row, col]) for col in range(3)]
+        axes = [fig.add_subplot(gs[row, col]) for col in range(2)]
         img = axes[0].imshow(m["spread"], cmap=SPREAD_CMAP, vmin=0, vmax=vmax, origin="lower",
                              interpolation="none")
         axes[1].imshow(m["rmse"], cmap=SPREAD_CMAP, vmin=0, vmax=vmax, origin="lower",
                        interpolation="none")
-        axes[2].imshow(np.where(np.isfinite(m["spread"]), 0.0, np.nan), cmap=BACKGROUND_CMAP,
-                       origin="lower", interpolation="none")
-        img_ratio = axes[2].imshow(m["ratio"], cmap=RATIO_CMAP, norm=ratio_norm, origin="lower",
-                                   interpolation="none")
         for ax, title in zip(axes, titles):
             _clean_image_axis(ax)
             if row == 0:
                 ax.set_title(title)
         axes[0].set_ylabel(f"{season} season")
 
-    fig.colorbar(img, cax=fig.add_subplot(gs[n, :2]), orientation="horizontal",
-                 extend="max").set_label("SIC")
-    cbar = fig.colorbar(img_ratio, cax=fig.add_subplot(gs[n, 2]), orientation="horizontal",
-                        extend="both")
-    cbar.set_ticks([1 / 4, 1 / 2, 1, 2, 4], labels=["1/4", "1/2", "1", "2", "4"])
-    cbar.minorticks_off()
-    cbar.set_label("ratio")
+    fig.colorbar(img, cax=fig.add_subplot(gs[n, :]), orientation="horizontal").set_label("SIC")
 
-    savefig(fig, out_dir, name, width=TEXTWIDTH_IN, height=1.9 * n + 0.7)
+    savefig(fig, out_dir, name, width=TEXTWIDTH_IN * 2 / 3, height=1.9 * n + 0.7)
     plt.close(fig)
 
 
