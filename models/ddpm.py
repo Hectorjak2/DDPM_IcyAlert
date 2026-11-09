@@ -491,7 +491,7 @@ class ConditionalDDPM(DDPM):
             input_Xm1 = torch.cat([xtm1, selected_context], dim=1)
             unfolded_x0_residual = model(self.model_input(input_Xm1), t-1, month)
 
-            se = 0.5 * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2 + 0.5 * (unfolded_x0_residual - x0_residual.unsqueeze(1)) ** 2
+            se = w * 0.5 * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2 + w * 0.5 * (unfolded_x0_residual - x0_residual.unsqueeze(1)) ** 2
         else: 
             se = w * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
 

@@ -5,8 +5,9 @@ unet_conf = UnetConfig()
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
 
-train_conf.experiment_name = "ddpm-titanfull-shif128-ip"
-ddpm_conf.cosine_shift_res = 128
+train_conf.experiment_name = "ddpm-titanfull-dose-ip"
+ddpm_conf.cosine_shift_res = 64
+train_conf.dose_loss = 0.1
 
 model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,
@@ -24,8 +25,9 @@ model, ddpm, train_ds = run_ddpm(
             unet_config=unet_conf
         )
 
-train_conf.experiment_name = "ddpm-titanfull-shif256-ip"
-ddpm_conf.cosine_shift_res = 256
+train_conf.dose_loss = None
+train_conf.unfolded_loss = True
+train_conf.experiment_name = "ddpm-titanfull-unfold-ip"
 
 model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,
