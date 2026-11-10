@@ -167,7 +167,7 @@ def deep_forecaster(members_dir: str, member_seeds: list[int], train_cfg: TrainC
 
 def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfig, unet_cfg: UnetConfig, ddpm_cfg: DDPMConfig) -> DDPMForecaster:
     """The conditional DDPM in `weights`. ddpm_cfg must match the run that produced the weights
-    (schedule, cosine_shift_res, timesteps)."""
+    (schedule, cosine_shift_res, cosine_shift_res_t0, timesteps)."""
     ddpm = ConditionalDDPM(
         timesteps=ddpm_cfg.timesteps,
         device=device,
@@ -175,6 +175,7 @@ def ddpm_forecaster(weights: str, test_ds: CARRA2Forecast, train_cfg: TrainConfi
         land_mask=test_ds.finite_mask,
         schedule=ddpm_cfg.schedule,
         cosine_shift_res=ddpm_cfg.cosine_shift_res,
+        cosine_shift_res_t0=ddpm_cfg.cosine_shift_res_t0,
         forecast_period=train_cfg.forecasting_slice,
         batch_size=train_cfg.batch_size,
         unfolded=False,  # only affects the training loss

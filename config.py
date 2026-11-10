@@ -35,7 +35,7 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "shifted_cosine"
+    schedule: str = "interpolated_cosine"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -45,9 +45,17 @@ class DDPMConfig:
     laplace_mu: float = 0
     laplace_b: float = 0.5
 
-    #Only used when schedule is cosine: 
+    #Only used when schedule is cosine:
     cosine_s: float = 0.008
+    # shifted_cosine: reference resolution of the log-SNR shift 2 log(res / image_size).
+    # interpolated_cosine: the reference resolution at t=T (the noisy end).
     cosine_shift_res: int = 64
+    # Only used when schedule == "interpolated_cosine" (Hoogeboom et al. 2023): the reference
+    # resolution at t=0; the shift moves linearly in t between the two. None means image_size,
+    # i.e. no shift at t=0, so the chain ends as clean as plain cosine (sqrt(alpha_bar) ~ 1 at t=0)
+    # instead of shifted_cosine 64's 0.996. With 64 at t=T, on 896: ~5% near-clean steps, ~61%
+    # transition, ~34% pure noise (shifted_cosine 64: 0%, 39%, 61%).
+    cosine_shift_res_t0: int | None = None
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
@@ -118,8 +126,8 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"ddpm-titanfull-shif64-ip-ensemble"
-    batch_size: int = 2
+    experiment_name: str = f"ddpm-titanfull-interp64-ip"
+    batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 100
@@ -127,7 +135,7 @@ class TrainConfig:
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = True 
-    weights: str = None#"results/ensembles/member_0/best_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    weights: str = None#"results/ddpm-titanfull-shif64-ip/best_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

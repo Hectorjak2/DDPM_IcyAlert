@@ -19,13 +19,15 @@ from config import DDPMConfig
 from models.ddpm import DDPM, build_schedule
 
 # Readable, LaTeX-safe names for DDPM.SCHEDULES
-SCHEDULE_NAMES = {"linear": "Linear", "cosine": "Cosine", "laplace": "Laplace", "shifted_cosine": "Shifted cosine"}
+SCHEDULE_NAMES = {"linear": "Linear", "cosine": "Cosine", "laplace": "Laplace", "shifted_cosine": "Shifted cosine",
+                  "interpolated_cosine": "Interpolated cosine"}
 
 # The parameters each schedule reads
 SCHEDULE_PARAMS = {
     "linear": ("beta_start", "beta_end"),
     "cosine": ("cosine_s",),
     "shifted_cosine": ("cosine_s", "cosine_shift_res"),
+    "interpolated_cosine": ("cosine_s", "cosine_shift_res", "cosine_shift_res_t0"),
     "laplace": ("laplace_mu", "laplace_b"),
 }
 
@@ -70,6 +72,11 @@ class Schedule:
             params = rf"$s = {p['cosine_s']:g}$"
         elif self.kind == "shifted_cosine":
             params = rf"$s = {p['cosine_s']:g}$, $\delta = {self.shift(image_size):.2f}$"
+        elif self.kind == "interpolated_cosine":
+            res_t0 = image_size if p["cosine_shift_res_t0"] is None else p["cosine_shift_res_t0"]
+            d0 = 2 * math.log(res_t0 / image_size)
+            dT = 2 * math.log(p["cosine_shift_res"] / image_size)
+            params = rf"$s = {p['cosine_s']:g}$, $\delta = {d0:.2f} \to {dT:.2f}$"
         elif self.kind == "laplace":
             params = rf"$\mu = {p['laplace_mu']:g}$, $b = {p['laplace_b']:g}$"
         return f"{self.name} ({params})"

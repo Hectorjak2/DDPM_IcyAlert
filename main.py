@@ -73,6 +73,7 @@ def run_ddpm(dataset: DatasetChoice,
                 land_mask=train_ds.finite_mask,
                 schedule=ddpm_config.schedule,
                 cosine_shift_res=ddpm_config.cosine_shift_res,
+                cosine_shift_res_t0=ddpm_config.cosine_shift_res_t0,
                 forecast_period=forecast_period,
                 batch_size=train_config.batch_size,
                 unfolded=train_config.unfolded_loss,
@@ -93,6 +94,7 @@ def run_ddpm(dataset: DatasetChoice,
             land_mask=train_ds.finite_mask,
             schedule=ddpm_config.schedule,
             cosine_shift_res=ddpm_config.cosine_shift_res,
+            cosine_shift_res_t0=ddpm_config.cosine_shift_res_t0,
         )
 
     print(schedule_summary(ddpm))

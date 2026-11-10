@@ -20,6 +20,7 @@ def build_schedule(
     beta_end: float = DDPMConfig.beta_end,
     cosine_s: float = DDPMConfig.cosine_s,
     cosine_shift_res: int = DDPMConfig.cosine_shift_res,
+    cosine_shift_res_t0: int | None = DDPMConfig.cosine_shift_res_t0,
     laplace_mu: float = DDPMConfig.laplace_mu,
     laplace_b: float = DDPMConfig.laplace_b,
 ):
@@ -40,7 +41,7 @@ def build_schedule(
         alphas_bar = torch.cumprod(alphas, dim=0)
 
     else:
-        if schedule in ("cosine", "shifted_cosine"):
+        if schedule in ("cosine", "shifted_cosine", "interpolated_cosine"):
             s = cosine_s
             x = torch.arange(timesteps + 1, dtype=torch.float64) / timesteps
             f = torch.cos((x + s) / (1.0 + s) * math.pi / 2.0) ** 2
@@ -50,6 +51,19 @@ def build_schedule(
                 shift = 2.0 * math.log(cosine_shift_res / image_size)
                 log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + shift
                 alphas_bar = torch.sigmoid(log_snr)
+
+            elif schedule == "interpolated_cosine":
+                # Hoogeboom et al. (2023, simple diffusion): the log-SNR shift moves linearly in t
+                # from 2 log(cosine_shift_res_t0 / image_size) at t=0 to 2 log(cosine_shift_res /
+                # image_size) at t=T. The noisy end keeps the shifted schedule's large-scale
+                # behaviour; the clean end reaches a near noise-free x_t, so the last x0 estimate
+                # can commit to the bound (solid ice, open water) instead of averaging below it.
+                res_t0 = image_size if cosine_shift_res_t0 is None else cosine_shift_res_t0
+                shift_t0 = 2.0 * math.log(res_t0 / image_size)
+                shift_T = 2.0 * math.log(cosine_shift_res / image_size)
+                frac = x[1:]  # t / T for t = 1..T, the same grid alphas_bar is built on
+                log_snr = torch.log(alphas_bar / (1.0 - alphas_bar)) + (1.0 - frac) * shift_t0 + frac * shift_T
+                alphas_bar = torch.sigmoid(log_snr).clamp(1e-12, 1.0 - 1e-12)
 
         elif schedule == "laplace":
             mu, b = laplace_mu, laplace_b
@@ -68,7 +82,7 @@ def build_schedule(
 
 class DDPM:
     # Noise schedules accepted by build_schedule(); plotting iterates over this.
-    SCHEDULES = ("linear", "shifted_cosine", "cosine", "laplace")
+    SCHEDULES = ("linear", "shifted_cosine", "interpolated_cosine", "cosine", "laplace")
 
     def __init__(
         self,
@@ -78,21 +92,26 @@ class DDPM:
         land_mask: Optional[torch.Tensor] = None,
         schedule: str = None,
         cosine_shift_res: int = None,
+        cosine_shift_res_t0: int | None = DDPMConfig.cosine_shift_res_t0,
     ):
         """
         DDPM wrapper.
 
         Args:
             schedule: one of DDPM.SCHEDULES
-            cosine_shift_res: reference resolution of the shifted cosine schedule. Must be passed
-                explicitly to take a config instance's value; build_schedule's default is the
-                class-level DDPMConfig.cosine_shift_res, fixed at import time.
+            cosine_shift_res: reference resolution of the shifted cosine schedule (for
+                interpolated_cosine: at t=T). Must be passed explicitly to take a config
+                instance's value; build_schedule's default is the class-level
+                DDPMConfig.cosine_shift_res, fixed at import time.
+            cosine_shift_res_t0: reference resolution at t=0 of interpolated_cosine; None means
+                image_size (no shift). Same caveat: pass the config instance's value explicitly.
         """
         self.timesteps = timesteps
         self.device = device
         self.image_size = image_size
         self.schedule = schedule if schedule is not None else DDPMConfig.schedule
         self.cosine_shift_res = cosine_shift_res if cosine_shift_res is not None else DDPMConfig.cosine_shift_res
+        self.cosine_shift_res_t0 = cosine_shift_res_t0
         self.output_name = "" # Initialize output_name to an empty string
 
         # The land mask is resolved first
@@ -137,7 +156,8 @@ class DDPM:
         Build the diffusion schedule from DDPMConfig, returning ``(betas, alphas, alphas_bar)``.
         """
         return build_schedule(self.schedule, timesteps, self.image_size,
-                              cosine_shift_res=self.cosine_shift_res)
+                              cosine_shift_res=self.cosine_shift_res,
+                              cosine_shift_res_t0=self.cosine_shift_res_t0)
 
 
     def model_input(self, xt: torch.Tensor) -> torch.Tensor:
