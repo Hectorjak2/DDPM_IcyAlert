@@ -140,8 +140,8 @@ class EnsembleConfig:
     """
     Ensemble sampling (see ensemble.py). Dates, test slice and dataset come from TrainConfig.
     """
-    method: str = "deep" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
-    weights: str = "results/ddpm-rescropped-shif70/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
+    method: str = "ddpm" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
+    weights: str = "results/ddpm-titanfull-shif64-ip/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
-    n_members: int = 8
-    experiment_name: str = f"{method}-unet-titan-ensemble"
+    n_members: int = 10
+    experiment_name: str = f"{method}-titan-ensemble-ip64"
