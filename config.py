@@ -119,7 +119,7 @@ class TrainConfig:
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
     experiment_name: str = f"ddpm-titanfull-shif64-ip-ensemble"
-    batch_size: int = 4
+    batch_size: int = 2
     epochs: int = 10
     lr: float = 3e-4
     number_of_samples: int = 100
