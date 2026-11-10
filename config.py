@@ -47,7 +47,7 @@ class DDPMConfig:
 
     #Only used when schedule is cosine: 
     cosine_s: float = 0.008
-    cosine_shift_res: int = 32
+    cosine_shift_res: int = 64
 
     # Clamp the predicted x_0 residual at every reverse step so that k + r stays in [-1, 1].
     # The bounds are correct, but where the truth sits on one (open water k=-1, full ice k=+1;
@@ -118,7 +118,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"ddpm-titanfull-shif32-ip"
+    experiment_name: str = f"ddpm-titanfull-shif64-ip-ensemble"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
