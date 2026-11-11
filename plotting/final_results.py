@@ -25,20 +25,20 @@ import numpy as np
 import pandas as pd
 
 from plotting.config import savefig, TEXTWIDTH_IN
-from plotting.evaluation import (RESIDUAL_CMAP, SEASON_TITLES, _clean_image_axis,
+from plotting.evaluation import (RESIDUAL_CMAP, _clean_image_axis,
                                  _load_climatology, load_leads, mean_residuals, sample_errors)
 
 # Folder names under results/, in the order they appear in the table and the grid.
 RUNS = [
-    "ddpm-titanfull-shif64",
+    "ddpm-titanfull-shif32-ip",
     "ddpm-titanfull-shif64-ip",
-    "ddim-titanfull-shif64",
+    "ddpm-titanfull-shif128-ip"
 ]
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
-    "ddpm-titanfull-shif64": "Shif64",
-    "ddpm-titanfull-shif64-ip": "Shif64-IP",
-    "ddim-titanfull-shif64": "Shif64 DDIM",
+    "ddpm-titanfull-shif32-ip": "Shift (32)",
+    "ddpm-titanfull-shif64-ip": "Shif (64) IP",
+    "ddpm-titanfull-shif128-ip": "Shif (128) IP",
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written
@@ -189,7 +189,7 @@ def plot_mean_residual_grid(results, out_dir):
                 img = ax.imshow(by_season[season], cmap=RESIDUAL_CMAP, vmin=-vmax, vmax=vmax,
                                 origin="lower", interpolation="none")
             if col == 0:
-                ax.set_ylabel(f"{SEASON_TITLES[season]}, $n={truth[season][2]}$")
+                ax.set_ylabel(season.capitalize())
         axes[0, col].set_title(title)
 
     # One inset colorbar per row next to the right-hand map, so it matches the image height;

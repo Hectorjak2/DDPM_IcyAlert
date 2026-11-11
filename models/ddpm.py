@@ -560,7 +560,10 @@ class ConditionalDDPM(DDPM):
         if self.clamp_x0:
             k, s = base, self.residual_std
             predicted_x0_residual = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s)
-        return predicted_x0_residual
+        # Land is 0 in training (compute_loss: nan_to_num), so keep it 0 here; the sampler's own
+        # noise then gives land sqrt(1 - alpha_bar) * noise, as the network saw in training.
+        return predicted_x0_residual.masked_fill(~self.water_mask, 0.0)
+
 
     def ddim_timesteps(self) -> list[int]:
         """Descending DDIM steps: ddim_steps evenly spaced values from T-1 to 0, both included,
