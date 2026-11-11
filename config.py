@@ -135,7 +135,7 @@ class TrainConfig:
     lead_months: int = 6  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = False 
-    weights: str = "results/ddpm-titanfull-shif64-ip/best_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    weights: str = "ddpm-titanfull-shif64-ip/best_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
