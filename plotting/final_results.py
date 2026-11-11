@@ -32,13 +32,15 @@ from plotting.evaluation import (RESIDUAL_CMAP, _clean_image_axis,
 RUNS = [
     "ddpm-titanfull-shif32-ip",
     "ddpm-titanfull-shif64-ip",
-    "ddpm-titanfull-shif128-ip"
+    "ddpm-titanfull-shif128-ip",
+    "tt"
 ]
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
     "ddpm-titanfull-shif32-ip": "Shift (32)",
     "ddpm-titanfull-shif64-ip": "Shif (64) IP",
     "ddpm-titanfull-shif128-ip": "Shif (128) IP",
+    "tt": "Land-corrected (64)"
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written

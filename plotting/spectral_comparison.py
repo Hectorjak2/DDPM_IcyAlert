@@ -1,19 +1,23 @@
-"""Thesis figure: radial power spectral density of the target SIC, the UNet forecasts and
-the DDPM forecasts in the land-free Denmark Strait window (plotting.spectral).
+"""Thesis figure: radial power spectral density of the target SIC and the forecasts of any
+number of sampled runs in the land-free Denmark Strait window (plotting.spectral).
 
-Each curve is the PSD averaged over the test dates both runs share (the UNet and DDPM
-pickles are drawn with the same ``sample_seed``, so a shorter run's dates are a prefix of
-the longer's), against wavelength 1/k in km. A model curve below the target at a given
+Edit ``RUNS`` (folder names under ``results/``) and optionally ``LABELS`` below, then run
+from the repo root:
+
+    python -m plotting.spectral_comparison
+
+Each curve is the PSD averaged over the target dates that all runs share (runs sampled with
+the same ``TrainConfig.sample_seed`` share their first dates), against wavelength 1/k in km.
+The target curve comes from the first run. A model curve below the target at a given
 wavelength is missing structure at that scale (smoothing).
 
-Writes ``<out>/spectral_comparison.pdf``. Run from the repo root:
-    python -m plotting.spectral_comparison [unet_run] [ddpm_run] [--out figures]
+Writes ``<OUT_DIR>/spectral_comparison.pdf``.
 """
-import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS
@@ -21,12 +25,41 @@ from plotting.evaluation import load_leads
 from plotting.spectral import find_landfree_region, mean_spacing_km, radial_psd
 from utils.dataloader import CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
 
+# Folder names under results/, in the order they appear in the legend.
+RUNS = [
+    "deep-ensemble",
+    "ddpm-titanfull-shif128-ip",
+    "tt"
+]
+# Optional display names; a run not listed here is shown by its folder name.
+LABELS = {
+    "member3-unet": "UNet",
+    "ddpm-titanfull-shif128-ip": "DDPM",
+    "tt": "Land-corrected64"
+}
+LEAD = 1             # lead time to score; every run needs at least this many leads
+OUT_DIR = "figures"  # where the figure is written
+
+# The target is charcoal; runs take these colours and markers in RUNS order (the first two
+# match plotting.model_comparison: UNet teal, DDPM plum).
+TARGET_STYLE = (COLORS[5], MARKERS[0])
+RUN_COLORS = [COLORS[i] for i in (0, 7, 1, 2, 3, 6)]
+RUN_MARKERS = [MARKERS[i] for i in (1, 3, 2, 4, 5, 6, 7)]
+
 # The WEST window inside the full-domain store (utils/prepare_west_zarr.py). Only the
 # full-domain store still has latitude/longitude.
 WEST_Y0, WEST_X0 = 300, 884
 
 # Wavelength ticks [km].
 WAVELENGTH_TICKS = [300, 100, 50, 25, 10, 5]
+
+
+def _tex_name(run: str) -> str:
+    """Display name for a run, safe for usetex."""
+    label = LABELS.get(run, run)
+    for char in "_%&#":
+        label = label.replace(char, "\\" + char)
+    return label
 
 
 def cropped_lat_lon():
@@ -38,37 +71,66 @@ def cropped_lat_lon():
     return ds.latitude.values, ds.longitude.values
 
 
-def mean_psd(fields, dx_km, region):
-    """Wavenumbers and PSD averaged over a list of [H, W] fields."""
-    psds = [radial_psd(f, dx_km, region) for f in fields]
-    return psds[0][0], np.mean([p for _, p in psds], axis=0)
+def load_psds(run, lat, lon, window=None):
+    """Per-date PSDs of one run's predictions (and targets), so the (large) pickle can be
+    freed before the next one is loaded.
+
+    ``window`` is ``(region, dx_km)``; when None it is found from this run's first target.
+    Returns ``(k, predictions, targets, window)`` with ``predictions`` and ``targets`` dicts
+    target date -> PSD.
+    """
+    _, leads = load_leads(run)
+    if len(leads) < LEAD:
+        raise ValueError(f"{run} has {len(leads)} lead time(s), LEAD = {LEAD}.")
+    data = leads[LEAD - 1]
+    del leads
+
+    if window is None:
+        region = find_landfree_region(data["targets"][0], lat)
+        dx_km = mean_spacing_km(lat, lon, region)
+        print(f"Window {region}, mean spacing {dx_km:.3f} km")
+        window = (region, dx_km)
+    region, dx_km = window
+
+    dates = [pd.Timestamp(t[0]) for t in data["times"]]
+    k = None
+    predictions, targets = {}, {}
+    for date, pred, target in zip(dates, data["predictions"], data["targets"]):
+        k, predictions[date] = radial_psd(pred, dx_km, region)
+        _, targets[date] = radial_psd(target, dx_km, region)
+    return k, predictions, targets, window
 
 
-def make_figure(unet_run, ddpm_run, out_dir):
-    _, unet = load_leads(unet_run)
-    _, ddpm = load_leads(ddpm_run)
-    unet, ddpm = unet[0], ddpm[0]  # lead 1
-
-    n = min(len(unet["times"]), len(ddpm["times"]))
-    if [t[0] for t in unet["times"][:n]] != [t[0] for t in ddpm["times"][:n]]:
-        raise ValueError("The two runs were not sampled on the same dates (different sample_seed?).")
-    print(f"Using the {n} test dates both runs share.")
+def make_figure(runs, out_dir):
+    if not runs:
+        raise ValueError("RUNS is empty -- list the folders under results/ to compare.")
+    if len(runs) > len(RUN_COLORS):
+        raise ValueError(f"At most {len(RUN_COLORS)} runs fit the colour cycle, got {len(runs)}.")
 
     lat, lon = cropped_lat_lon()
-    region = find_landfree_region(ddpm["targets"][0], lat)
-    dx_km = mean_spacing_km(lat, lon, region)
-    print(f"Window {region}, mean spacing {dx_km:.3f} km")
+    window = None
+    loaded = []  # (run, predictions, targets)
+    for run in runs:
+        print(f"Loading {run} ...")
+        k, predictions, targets, window = load_psds(run, lat, lon, window)
+        loaded.append((run, predictions, targets))
 
-    k, truth = mean_psd(ddpm["targets"][:n], dx_km, region)
-    _, psd_unet = mean_psd(unet["predictions"][:n], dx_km, region)
-    _, psd_ddpm = mean_psd(ddpm["predictions"][:n], dx_km, region)
+    common = sorted(set.intersection(*(set(p) for _, p, _ in loaded)))
+    if not common:
+        raise ValueError("The runs share no target dates (different sample_seed?).")
+    for run, predictions, _ in loaded:
+        if len(predictions) != len(common):
+            print(f"{run} has {len(predictions)} dates, {len(common)} shared with all runs.")
+    print(f"Using the {len(common)} test dates all runs share.")
+
+    truth_by_date = loaded[0][2]
+    series = [("Target", np.mean([truth_by_date[d] for d in common], axis=0), *TARGET_STYLE)]
+    for i, (run, predictions, _) in enumerate(loaded):
+        psd = np.mean([predictions[d] for d in common], axis=0)
+        series.append((_tex_name(run), psd, RUN_COLORS[i], RUN_MARKERS[i]))
 
     wavelength = 1 / k  # [km]
     fig, ax = plt.subplots()
-    # Colours match plotting.model_comparison (UNet teal, DDPM plum); the target is charcoal.
-    series = [("Target", truth, COLORS[5], MARKERS[0]),
-              ("UNet", psd_unet, COLORS[0], MARKERS[1]),
-              ("DDPM", psd_ddpm, COLORS[7], MARKERS[3])]
     for label, psd, color, marker in series:
         ax.loglog(wavelength, psd, color=color, marker=marker, markevery=(2, 6), markersize=3,
                   linewidth=1.2, label=label)
@@ -89,11 +151,4 @@ def make_figure(unet_run, ddpm_run, out_dir):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("unet_run", nargs="?", default="member3-unet",
-                        help="UNet run: name under results/, its directory, or a samples.pkl path")
-    parser.add_argument("ddpm_run", nargs="?", default="ddpm-titanfull-shif128-ip",
-                        help="DDPM run, as unet_run")
-    parser.add_argument("--out", default="figures", help="directory the figure is written to")
-    args = parser.parse_args()
-    make_figure(args.unet_run, args.ddpm_run, args.out)
+    make_figure(RUNS, OUT_DIR)
