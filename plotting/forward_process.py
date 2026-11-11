@@ -19,8 +19,8 @@ SCHEDULES = [
 
 TIMESTEPS = 1000
 T_SHOWN = list(range(100, TIMESTEPS + 1, 100))  # 1-indexed steps; schedule index is t - 1
-DATE = "2000-03-15"  # near the annual sea-ice maximum
-MONTH_APART = "2000-04-15"
+DATE = "2000-04-15"  # near the annual sea-ice maximum
+MONTH_APART = "2000-09-15"
 # Plot every STRIDE-th pixel: keeps the PDF small. Striding (not pooling) keeps per-pixel noise variance.
 STRIDE = 8
 SEED = 0
