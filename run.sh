@@ -1,13 +1,13 @@
 #!/bin/sh
 
 ### General options ,gpua40, gpuv100, gpul40s, gpua100
-#BSUB -J LC-lin-cos
-#BSUB -q gpul40s
+#BSUB -J LC-shif-32-64
+#BSUB -q gpua100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 #BSUB -R "rusage[mem=32GB]"
-###BSUB -R "select[gpu80gb]"
+#BSUB -R "select[gpu80gb]"
 
 #BSUB -u hectorheltj@gmail.com
 #BSUB -B
@@ -25,4 +25,4 @@ export CARRA2_DATA_ROOT=/work3/s234822/data/data/CARRA2_DAILY
 export TEMP_RESULT_STORAGE=/work3/s234822/data/data/samples
 
 /zhome/eb/6/205174/DDPM_IcyAlert/.venv/bin/python -u \
-    /zhome/eb/6/205174/DDPM_IcyAlert/tmp_runner1.py
+    /zhome/eb/6/205174/DDPM_IcyAlert/tmp_runner2.py
