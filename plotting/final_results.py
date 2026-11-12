@@ -25,22 +25,21 @@ import numpy as np
 import pandas as pd
 
 from plotting.config import savefig, TEXTWIDTH_IN
-from plotting.evaluation import (RESIDUAL_CMAP, _clean_image_axis,
+from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, _clean_image_axis,
                                  _load_climatology, load_leads, mean_residuals, sample_errors)
 
 # Folder names under results/, in the order they appear in the table and the grid.
 RUNS = [
-    "ddpm-titanfull-shif32-ip",
-    "ddpm-titanfull-shif64-ip",
-    "ddpm-titanfull-shif128-ip",
-    "tt"
+    "ddpm-corrected-land-64",
+    "ddpm-corrected-land-64-ip",
+    "ddpm-corrected-land-128",
 ]
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
-    "ddpm-titanfull-shif32-ip": "Shift (32)",
-    "ddpm-titanfull-shif64-ip": "Shif (64) IP",
-    "ddpm-titanfull-shif128-ip": "Shif (128) IP",
-    "tt": "Land-corrected (64)"
+    "ddpm-corrected-land-64": "Shift (64)",
+    "ddpm-corrected-land-64-ip": "Shift (64) IP",
+    "ddpm-corrected-land-128": "Shift (128)",
+    "ddpm-corrected-land-128-ip": "Shift (128) IP"
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written
@@ -176,9 +175,8 @@ def plot_mean_residual_grid(results, out_dir):
                for run, _, residuals in results]
     columns.append(("Truth", {s: truth[s][1] for s in seasons}))
 
-    # Shared scale for all panels, so runs and seasons compare directly.
-    fields = [f for _, by_season in columns for f in by_season.values()]
-    vmax = np.nanpercentile(np.abs(np.stack(fields)), 99)
+    # Fixed scale for all panels, so runs and seasons compare directly (and match mean_residual).
+    vmax = RESIDUAL_VMAX
 
     n_cols = len(columns)
     fig, axes = plt.subplots(len(seasons), n_cols, squeeze=False)
@@ -198,7 +196,7 @@ def plot_mean_residual_grid(results, out_dir):
     # a colorbar spanning several axes breaks savefig's tight_layout.
     for row in range(len(seasons)):
         cbar = fig.colorbar(img, cax=axes[row, -1].inset_axes([1.04, 0, 0.05, 1]),
-                            ticks=[-vmax, 0, vmax])
+                            ticks=[-vmax, 0, vmax], extend="both")
         cbar.ax.set_yticklabels([f"${-vmax:.2f}$", "$0$", f"${vmax:.2f}$"])
         cbar.set_label("SIC change", labelpad=4)
 

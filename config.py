@@ -116,7 +116,7 @@ class TrainConfig:
     # so the network also sees x_t slightly off the forward process, as it does in the sampling chain
     # (exposure bias: the drift toward melt in cool-season samples). The target is unchanged. Training
     # only, so the validation loss stays on clean inputs. None disables it; the paper uses 0.1.
-    input_perturbation: float | None = 0.1
+    input_perturbation: float | None = None
 
     #Forecasting and training settings: 
     training_slice: slice = TRAINING_SLICE #Set to None if forecasting should be disabled
@@ -134,8 +134,8 @@ class TrainConfig:
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = False 
-    weights: str = "ddpm-titanfull-shif64/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    training: bool = True 
+    weights: str = None#"ddpm-titanfull-shif64/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/

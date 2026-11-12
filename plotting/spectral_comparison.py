@@ -28,14 +28,18 @@ from utils.dataloader import CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
 # Folder names under results/, in the order they appear in the legend.
 RUNS = [
     "deep-ensemble",
-    "ddpm-titanfull-shif128-ip",
-    "tt"
+    "ddpm-corrected-land-64",
+    "ddpm-titanfull-shif64",
+    "ddpm-corrected-land-128",
 ]
+
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
-    "member3-unet": "UNet",
-    "ddpm-titanfull-shif128-ip": "DDPM",
-    "tt": "Land-corrected64"
+    "deep-ensemble": "UNet Ensemble",
+    "ddpm-corrected-land-64": "LC 64", 
+    "ddpm-corrected-land-64-ip": "LC 64 IP",
+    "ddpm-corrected-land-128": "LC 128",
+    "ddpm-corrected-land-128-ip": "LC 128 IP"
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written

@@ -50,6 +50,11 @@ SIC_CMAP.set_bad("lightgray")
 # Residual (k+1 - k) colormap: red = ice loss, blue = ice gain, land grey as above.
 RESIDUAL_CMAP = plt.cm.RdBu.copy()
 RESIDUAL_CMAP.set_bad("lightgray")
+# Fixed symmetric colour limit for the mean-residual maps, so the figures compare across runs.
+# A data-driven limit let a drifting model's predictions stretch the scale and wash out the
+# (identical) truth panels. The true mean residual has |.| <= 0.25 at the 99th percentile on
+# the 2024 forecast dates; anything beyond the limit is clipped (arrow ends on the colorbar).
+RESIDUAL_VMAX = 0.3
 
 N_BINS = 100  # 0.01-wide target-SIC bins for the calibration plot
 MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration curves
@@ -497,15 +502,16 @@ def mean_residuals(data) -> dict:
 
 def plot_mean_residual(data, out_dir):
     """Mean residual k+1 - k per season (columns), predicted (top row) vs truth (bottom row),
-    on one symmetric colour scale. Also prints the mean and RMS of their difference."""
+    on one fixed symmetric colour scale (RESIDUAL_VMAX). Also prints the mean and RMS of
+    their difference."""
     means = mean_residuals(data)
     seasons = [s for s in ("cool", "melt") if s in means]
     if not seasons:
         print("No samples -- skipping mean_residual.")
         return
 
-    # Shared scale for all panels, so seasons and rows compare directly
-    vmax = np.nanpercentile(np.abs(np.stack([f for s in seasons for f in means[s][:2]])), 99)
+    # Fixed scale for all panels, so seasons, rows and runs compare directly
+    vmax = RESIDUAL_VMAX
 
     fig, axes = plt.subplots(2, len(seasons), squeeze=False)
     for col, season in enumerate(seasons):
@@ -522,7 +528,7 @@ def plot_mean_residual(data, out_dir):
     # a colorbar spanning several axes breaks savefig's tight_layout.
     for row in range(2):
         cbar = fig.colorbar(img, cax=axes[row, -1].inset_axes([1.04, 0, 0.05, 1]),
-                            ticks=[-vmax, 0, vmax])
+                            ticks=[-vmax, 0, vmax], extend="both")
         cbar.ax.set_yticklabels([f"${-vmax:.2f}$", "$0$", f"${vmax:.2f}$"])
         cbar.set_label("SIC change", labelpad=4)
 

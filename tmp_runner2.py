@@ -5,11 +5,9 @@ unet_conf = UnetConfig()
 train_conf = TrainConfig()
 ddpm_conf = DDPMConfig()
 
-train_conf.training = True
-train_conf.input_perturbation = None
-train_conf.weights = None
-ddpm_conf.cosine_shift_res = 128
-train_conf.experiment_name = "ddpm-corrected-land-128"
+
+ddpm_conf.cosine_shift_res = 64
+train_conf.experiment_name = "ddpm-corrected-land-64"
 
 model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,
@@ -27,8 +25,8 @@ model, ddpm, train_ds = run_ddpm(
             unet_config=unet_conf
         )
 
-ddpm_conf.cosine_shift_res = 256
-train_conf.experiment_name = "ddpm-corrected-land-256"
+ddpm_conf.cosine_shift_res = 32
+train_conf.experiment_name = "ddpm-corrected-land-32"
 
 model, ddpm, train_ds = run_ddpm(
             dataset=train_conf.dataset,
