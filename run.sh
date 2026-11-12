@@ -1,7 +1,7 @@
 #!/bin/sh
 
 ### General options ,gpua40, gpuv100, gpul40s, gpua100
-#BSUB -J LC-shif-32-64
+#BSUB -J LC-lin-cos-v2
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
