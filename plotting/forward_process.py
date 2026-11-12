@@ -10,17 +10,15 @@ from plotting.schedules import Schedule
 from utils.dataloader import CARRA2
 
 SCHEDULES = [
-    Schedule("linear"),
     Schedule("cosine"),
-    Schedule("laplace", laplace_mu=0),
+    Schedule("linear"),
     Schedule("shifted_cosine", cosine_shift_res=64),
-    Schedule("shifted_cosine", cosine_shift_res=128),
 ]
 
 TIMESTEPS = 1000
 T_SHOWN = list(range(100, TIMESTEPS + 1, 100))  # 1-indexed steps; schedule index is t - 1
-DATE = "2000-04-15"  # near the annual sea-ice maximum
-MONTH_APART = "2000-09-15"
+DATE = "2000-09-15"  # near the annual sea-ice maximum
+MONTH_APART = "2001-04-15"
 # Plot every STRIDE-th pixel: keeps the PDF small. Striding (not pooling) keeps per-pixel noise variance.
 STRIDE = 8
 SEED = 0
@@ -75,8 +73,9 @@ axes[0, 0].set_title("$x_0$")
 for ax, t in zip(axes[0, 1:], T_SHOWN):
     ax.set_title(f"${t}$")
 
-# extend="both": noisy steps go beyond [-1, 1] and are shown saturated
-cbar = fig.colorbar(img, cax=fig.add_subplot(gs[:, n_cols]), extend="both", ticks=[-1, 0, 1])
+# Noisy steps go beyond [-1, 1] and are shown saturated; plain rectangular bar, no outline
+cbar = fig.colorbar(img, cax=fig.add_subplot(gs[:, n_cols]), ticks=[-1, 0, 1])
+cbar.outline.set_visible(False)
 cbar.set_label("SIC change", labelpad=4)
 
 savefig(fig, "figures", "forward_process", width=TEXTWIDTH_IN, height=ROW_HEIGHT * len(SCHEDULES))

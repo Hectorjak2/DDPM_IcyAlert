@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS
+from plotting.config import savefig, TEXTWIDTH_IN, COLORS
 from plotting.evaluation import load_leads
 from plotting.spectral import find_landfree_region, mean_spacing_km, radial_psd
 from utils.dataloader import CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
@@ -44,11 +44,12 @@ LABELS = {
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written
 
-# The target is charcoal; runs take these colours and markers in RUNS order (the first two
-# match plotting.model_comparison: UNet teal, DDPM plum).
-TARGET_STYLE = (COLORS[5], MARKERS[0])
+# The target is black; runs take these colours in RUNS order (the first two match
+# plotting.model_comparison: UNet teal, DDPM plum). Runs whose folder name contains
+# "ensemble" are drawn solid, all other runs dashed.
+TARGET_COLOR = "black"
 RUN_COLORS = [COLORS[i] for i in (0, 7, 1, 2, 3, 6)]
-RUN_MARKERS = [MARKERS[i] for i in (1, 3, 2, 4, 5, 6, 7)]
+MODEL_ALPHA = 0.8
 
 # The WEST window inside the full-domain store (utils/prepare_west_zarr.py). Only the
 # full-domain store still has latitude/longitude.
@@ -128,16 +129,22 @@ def make_figure(runs, out_dir):
     print(f"Using the {len(common)} test dates all runs share.")
 
     truth_by_date = loaded[0][2]
-    series = [("Target", np.mean([truth_by_date[d] for d in common], axis=0), *TARGET_STYLE)]
+    # (label, psd, line style kwargs). The target is solid black, opaque and drawn on top;
+    # models are slightly transparent, ensembles solid and everything else dashed.
+    series = [("Target", np.mean([truth_by_date[d] for d in common], axis=0),
+               dict(color=TARGET_COLOR, linestyle="-", zorder=3))]
     for i, (run, predictions, _) in enumerate(loaded):
         psd = np.mean([predictions[d] for d in common], axis=0)
-        series.append((_tex_name(run), psd, RUN_COLORS[i], RUN_MARKERS[i]))
+        linestyle = "-" if "ensemble" in run else "--"
+        series.append((_tex_name(run), psd,
+                       dict(color=RUN_COLORS[i], linestyle=linestyle, alpha=MODEL_ALPHA)))
 
     wavelength = 1 / k  # [km]
     fig, ax = plt.subplots()
-    for label, psd, color, marker in series:
-        ax.loglog(wavelength, psd, color=color, marker=marker, markevery=(2, 6), markersize=3,
-                  linewidth=1.2, label=label)
+    # No markers: they suggested the PSD is only computed at the marked points. Colour and
+    # line style tell the curves apart; each curve is all radial wavenumber bins joined.
+    for label, psd, style in series:
+        ax.loglog(wavelength, psd, linewidth=1.2, label=label, **style)
 
     ax.set_xlabel("wavelength (km)")
     ax.set_ylabel(r"PSD")
@@ -145,7 +152,9 @@ def make_figure(runs, out_dir):
     ax.set_xticks(WAVELENGTH_TICKS, labels=[str(t) for t in WAVELENGTH_TICKS])
     ax.minorticks_off()
 
-    ax.legend(loc="lower left")
+    # Legend in a box below the axes; tight_layout shrinks the axes to keep the figure square.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, frameon=True,
+              handlelength=1.5, columnspacing=1.0, borderaxespad=0)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
