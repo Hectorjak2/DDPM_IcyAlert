@@ -503,8 +503,8 @@ class ConditionalDDPM(DDPM):
             coef_xt = self.posterior_mean_coef_xt[t].view(-1, 1, 1, 1)
             variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
 
-            # Simulate the same step as p_sample, so clamp exactly when sampling does.
-            x0_step = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s) if self.clamp_x0 else predicted_x0_residual
+            # Simulate the same step as p_sample: clamp and zero land exactly as predict_x0 does.
+            x0_step = self.constrain_x0(predicted_x0_residual, k)
             mean = coef_x0 * x0_step + coef_xt * xt
             xtm1 = mean + torch.sqrt(variance_t) * z
             
@@ -556,7 +556,11 @@ class ConditionalDDPM(DDPM):
     def predict_x0(self, model, x, t, month, base: torch.Tensor) -> torch.Tensor:
         """The network's standardized residual x_0, clamped (DDPMConfig.clamp_x0) so that
         base + residual_std * x_0 stays in [-1, 1]. x and base as in p_sample."""
-        predicted_x0_residual = model(self.model_input(x), t, month)
+        return self.constrain_x0(model(self.model_input(x), t, month), base)
+
+    def constrain_x0(self, predicted_x0_residual: torch.Tensor, base: torch.Tensor) -> torch.Tensor:
+        """Clamp (DDPMConfig.clamp_x0) so base + residual_std * x_0 stays in [-1, 1], and zero land.
+        Shared by predict_x0 (sampling) and the simulated step of the unfolded loss, so both match."""
         if self.clamp_x0:
             k, s = base, self.residual_std
             predicted_x0_residual = torch.clamp(predicted_x0_residual, (-1.0 - k) / s, (1.0 - k) / s)
