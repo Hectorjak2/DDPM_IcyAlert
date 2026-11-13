@@ -33,13 +33,15 @@ RUNS = [
     "ddpm-corrected-land-64",
     "ddpm-corrected-land-64-ip",
     "ddpm-corrected-land-128",
+    "ddpm-corrected-land-256",
 ]
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
     "ddpm-corrected-land-64": "Shift (64)",
     "ddpm-corrected-land-64-ip": "Shift (64) IP",
     "ddpm-corrected-land-128": "Shift (128)",
-    "ddpm-corrected-land-128-ip": "Shift (128) IP"
+    "ddpm-corrected-land-128-ip": "Shift (128) IP",
+    "ddpm-corrected-land-256": "Shift (256)",
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written

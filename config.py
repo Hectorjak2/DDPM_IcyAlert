@@ -49,7 +49,7 @@ class DDPMConfig:
     cosine_s: float = 0.008
     # shifted_cosine: reference resolution of the log-SNR shift 2 log(res / image_size).
     # interpolated_cosine: the reference resolution at t=T (the noisy end).
-    cosine_shift_res: int = 64
+    cosine_shift_res: int = 256
     # Only used when schedule == "interpolated_cosine" (Hoogeboom et al. 2023): the reference
     # resolution at t=0; the shift moves linearly in t between the two. None means image_size,
     # i.e. no shift at t=0, so the chain ends as clean as plain cosine (sqrt(alpha_bar) ~ 1 at t=0)
@@ -130,7 +130,7 @@ class TrainConfig:
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 100
+    number_of_samples: int = 20
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
@@ -149,7 +149,7 @@ class EnsembleConfig:
     Ensemble sampling (see ensemble.py). Dates, test slice and dataset come from TrainConfig.
     """
     method: str = "ddpm" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
-    weights: str = "results/ddpm-titanfull-shif64-ip/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
+    weights: str = "results/ddpm-corrected-land-256/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
     n_members: int = 10
-    experiment_name: str = f"{method}-titan-ensemble-ip64"
+    experiment_name: str = f"{method}-LC-256-ensemble"
