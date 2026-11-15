@@ -28,25 +28,28 @@ from utils.dataloader import CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
 # Folder names under results/, in the order they appear in the legend.
 RUNS = [
     "deep-ensemble",
-    "ddpm-corrected-land-64",
-    "ddpm-titanfull-shif64",
-    "ddpm-corrected-land-128",
+    "ensembles/member_5",
+    "ddpm-corrected-land-256",
+    "ddpm-LC-256-ensemble",
 ]
 
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
-    "deep-ensemble": "UNet Ensemble",
+    "deep-ensemble": "U-Net Ensemble",
+    "ensembles/member_5": "U-Net Member",
     "ddpm-corrected-land-64": "LC 64", 
-    "ddpm-corrected-land-64-ip": "LC 64 IP",
     "ddpm-corrected-land-128": "LC 128",
-    "ddpm-corrected-land-128-ip": "LC 128 IP"
+    "ddpm-corrected-land-256": "DDPM Member",
+    "ddpm-LC-256-ensemble": "DDPM Ensemble",
+    "ddpm-corrected-land-32": "LC 32",
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written
 
 # The target is black; runs take these colours in RUNS order (the first two match
-# plotting.model_comparison: UNet teal, DDPM plum). Runs whose folder name contains
-# "ensemble" are drawn solid, all other runs dashed.
+# plotting.model_comparison: UNet teal, DDPM plum). Runs whose display label (LABELS,
+# else the folder name) contains "ensemble", ignoring case, are drawn solid, all other
+# runs dashed.
 TARGET_COLOR = "black"
 RUN_COLORS = [COLORS[i] for i in (0, 7, 1, 2, 3, 6)]
 MODEL_ALPHA = 0.8
@@ -100,6 +103,13 @@ def load_psds(run, lat, lon, window=None):
     dates = [pd.Timestamp(t[0]) for t in data["times"]]
     k = None
     predictions, targets = {}, {}
+    # An ensemble (ensemble_samples.pkl, or any pickle with M > 1 members per date) is
+    # scored by its ensemble mean, data["predictions"]; averaging members that disagree on
+    # small scales removes power there, which is what the figure should show. A single
+    # forecast is its only member.
+    n_members = data["members"][0].shape[0]
+    if n_members > 1:
+        print(f"{run}: ensemble of {n_members} members, plotting the ensemble mean")
     for date, pred, target in zip(dates, data["predictions"], data["targets"]):
         k, predictions[date] = radial_psd(pred, dx_km, region)
         _, targets[date] = radial_psd(target, dx_km, region)
@@ -135,7 +145,7 @@ def make_figure(runs, out_dir):
                dict(color=TARGET_COLOR, linestyle="-", zorder=3))]
     for i, (run, predictions, _) in enumerate(loaded):
         psd = np.mean([predictions[d] for d in common], axis=0)
-        linestyle = "-" if "ensemble" in run else "--"
+        linestyle = "-" if "ensemble" in LABELS.get(run, run).lower() else "--"
         series.append((_tex_name(run), psd,
                        dict(color=RUN_COLORS[i], linestyle=linestyle, alpha=MODEL_ALPHA)))
 

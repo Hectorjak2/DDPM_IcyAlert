@@ -30,11 +30,16 @@ from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, _clean_image_axis
 
 # Folder names under results/, in the order they appear in the table and the grid.
 RUNS = [
-    "ddpm-corrected-land-32",
-    "ddpm-corrected-land-64",
-    "ddpm-corrected-land-128",
+    #"ddpm-corrected-land-32",
+    #"ddpm-corrected-land-64",
+    #"ddpm-corrected-land-128",
     "ddpm-corrected-land-256",
-    "ddpm-corrected-land-linear",
+    #"ddpm-corrected-land-linear",
+    #"ddpm-corrected-land-cosine",
+    "ddpm-LC-256-ensemble",
+    "ensembles/member_5",
+    "deep-ensemble",
+
 ]
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
@@ -43,6 +48,11 @@ LABELS = {
     "ddpm-corrected-land-256": "Shift (256)",
     "ddpm-corrected-land-linear": "Linear",
     "ddpm-corrected-land-32": "Shift (32)",
+    "ddpm-corrected-land-cosine": "Cosine",
+    "ensembles/member_5": "UNet",
+    "deep-ensemble": "Unet Ensemble",
+    "ddpm-LC-256-ensemble": "DDPM Ensemble"
+
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "figures"  # where the figure is written

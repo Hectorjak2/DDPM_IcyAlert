@@ -138,10 +138,17 @@ def print_spread_skill(n_members, stats):
 def plot_rank_histogram(n_members, stats, out_dir, name):
     """Relative frequency per rank over the marginal ice zone; bars for all dates, outlines
     per season."""
+    fig, ax = plt.subplots()
+    draw_rank_histogram(ax, n_members, stats)
+    savefig(fig, out_dir, name, width=TEXTWIDTH_IN / 2, height=2.8)
+    plt.close(fig)
+
+
+def draw_rank_histogram(ax, n_members, stats, ylabel=True, legend=True):
+    """The rank histogram of plot_rank_histogram, drawn on ``ax``."""
     edges = np.arange(n_members + 2) - 0.5
     flat = 1 / (n_members + 1)
 
-    fig, ax = plt.subplots()
     counts = stats["all"]["counts"]
     ax.bar(np.arange(n_members + 1), counts / counts.sum(), width=1.0, color=COLORS[0],
            alpha=0.6, linewidth=0, label="all dates")
@@ -151,13 +158,12 @@ def plot_rank_histogram(n_members, stats, out_dir, name):
             ax.stairs(c / c.sum(), edges, color=color, linewidth=1.2, label=f"{season} season")
     ax.axhline(flat, color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE, label="flat")
     ax.set_xlabel("rank of truth among members")
-    ax.set_ylabel("relative frequency")
+    if ylabel:
+        ax.set_ylabel("relative frequency")
     ax.set_xticks(range(0, n_members + 1, 2))
     ax.set_xlim(edges[0], edges[-1])
-    ax.legend()
-
-    savefig(fig, out_dir, name, width=TEXTWIDTH_IN / 2, height=2.8)
-    plt.close(fig)
+    if legend:
+        ax.legend()
 
 
 def spread_skill_maps(data):

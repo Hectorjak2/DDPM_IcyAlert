@@ -106,7 +106,7 @@ class TrainConfig:
     Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "ddpm" #"unet", "ddpm"
+    training_type: str = "unet" #"unet", "ddpm"
 
     #DDPM specific
     analysis_sampling: bool = False
@@ -126,7 +126,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"ddpm-LC-256-DOSE"
+    experiment_name: str = f"iiiii"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -134,8 +134,8 @@ class TrainConfig:
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
-    training: bool = True 
-    weights: str = None#"ddpm-titanfull-shif64/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
+    training: bool = False 
+    weights: str = "results/ensembles/member_5/final_weights.pth"#"ddpm-titanfull-shif64-ip/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
@@ -152,4 +152,4 @@ class EnsembleConfig:
     weights: str = "results/ddpm-corrected-land-256/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
     n_members: int = 10
-    experiment_name: str = f"{method}-LC-256-ensemble"
+    experiment_name: str = f"{method}-LC-256-ensemble-v2"

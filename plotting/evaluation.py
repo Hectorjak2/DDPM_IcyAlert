@@ -22,11 +22,18 @@ Reads ``results/<run>/samples.pkl`` written by
 Also prints a table of the per-sample MSE over water, overall and per season, next to
 the persistence and climatology baselines (see ``models.climatology``).
 
+Ensembles: an ``ensemble_samples.pkl`` (``ensemble.py``, same layout) is read too, and
+used when the run has no ``samples.pkl``. Every figure and the MSE then show the ensemble
+mean. ``mse_by_lead`` adds the single-member MSE, and a second table lists the single-member
+MSE and the ensemble CRPS next to the baselines' MAE (their CRPS). ``sampling_loss`` is
+the first member's. ``--member M`` scores one member as a single forecast instead
+(figures go to ``member<M>/``). Rank histogram and spread-skill: ``plotting.ensemble_evaluation``.
+
 Works for both CARRA2-TEST and CARRA2-WEST without a mask file: land is already NaN in
 the pickled targets and samples, so water = ``isfinite(target)`` at whatever resolution
 the run used.
 
-Run from the repo root:  python -m plotting.ddpm_plots <run_name | path/to/samples.pkl>
+Run from the repo root:  python -m plotting.evaluation <run_name | path/to/samples.pkl>
 """
 import argparse
 import pickle
@@ -88,8 +95,9 @@ def _as_data_range(field: torch.Tensor) -> torch.Tensor:
     return field
 
 
-def load_leads(path: str | Path):
-    """Load a samples.pkl, given its path or the run's results directory/name.
+def load_leads(path: str | Path, member: int | None = None):
+    """Load a samples.pkl or ensemble_samples.pkl, given its path or the run's results
+    directory/name (samples.pkl if the run has both).
 
     Returns ``(run_dir, leads)`` with one ``data`` dict per lead time, lead 1 first (a
     single entry for a one-month forecast). Every field in ``data`` is a numpy [H, W]
@@ -97,10 +105,17 @@ def load_leads(path: str | Path):
     array (or None for pickles written before the running loss existed, or by
     utils.sampling.forecast). In the dict for lead L, ``predictions`` and ``targets`` are
     k+L and ``times`` holds (k+L, k, k-1), so everything downstream reads as for lead 1.
+
+    ``members`` holds the [M, H, W] ensemble per sample (M = 1 for a single forecast) and
+    ``predictions`` its ensemble mean, so every figure and the MSE score the ensemble mean.
+    ``member`` keeps only that one member, which then is scored as a single forecast.
     """
     path = Path(path)
     if path.suffix != ".pkl":
-        path = (path if path.exists() else Path("results") / path) / "samples.pkl"
+        run_dir = path if path.exists() else Path("results") / path
+        path = run_dir / "samples.pkl"
+        if not path.exists() and (run_dir / "ensemble_samples.pkl").exists():
+            path = run_dir / "ensemble_samples.pkl"
 
     with open(path, "rb") as f:
         payload = pickle.load(f)
@@ -117,14 +132,23 @@ def load_leads(path: str | Path):
             losses = [losses]
         losses = np.asarray(losses, dtype=np.float64)
 
-    # samples are [1, lead_months, H, W] (older pickles [1, 1, H, W]), targets [lead_months, H, W]
-    samples = [s.reshape(-1, *s.shape[-2:]) for s in samples]
+    # samples are [n_members, lead_months, H, W]; pickles older than forecast() held a single
+    # member, some without the member/lead axes. targets are [lead_months, H, W].
+    samples = [s if s.ndim == 4 else s.reshape(1, -1, *s.shape[-2:]) for s in samples]
+    if member is not None:
+        n_members = samples[0].shape[0]
+        if not 0 <= member < n_members:
+            raise ValueError(f"member {member} out of range: {path} has {n_members} member(s)")
+        samples = [s[member:member + 1] for s in samples]
     targets = [_as_data_range(t).reshape(-1, *t.shape[-2:]) for t in targets]
     # contexts are [2, H, W] = (k, k-1)
     contexts = [_as_data_range(c) for c in contexts]
 
     leads = [{
-        "predictions": [s[lead].numpy() for s in samples],
+        "members": [s[:, lead].numpy() for s in samples],
+        # Land is NaN in every member, so the plain mean keeps it NaN. One member: no copy.
+        "predictions": [(s[0, lead] if s.shape[0] == 1 else s[:, lead].mean(dim=0)).numpy()
+                        for s in samples],
         "targets": [t[lead].numpy() for t in targets],
         "k": [c[0].numpy() for c in contexts],
         "km1": [c[1].numpy() for c in contexts],
@@ -135,10 +159,20 @@ def load_leads(path: str | Path):
     return path.parent, leads
 
 
-def load_samples(path: str | Path, lead: int = 1):
+def load_samples(path: str | Path, lead: int = 1, member: int | None = None):
     """``(run_dir, data)`` for one lead time; see load_leads."""
-    run_dir, leads = load_leads(path)
+    run_dir, leads = load_leads(path, member)
     return run_dir, leads[lead - 1]
+
+
+def n_members(data) -> int:
+    """Ensemble size of ``data`` (1 for a single forecast)."""
+    return data["members"][0].shape[0]
+
+
+def prediction_label(data) -> str:
+    """What ``predictions`` is, for figure labels."""
+    return "ensemble mean" if n_members(data) > 1 else "prediction"
 
 
 def _clean_image_axis(ax):
@@ -269,7 +303,7 @@ def plot_forecast_row(data, out_dir, index: int = 0):
         (data["km1"][index], rf"$k{{-}}1$: {_month(km1_date)}"),
         (data["k"][index], rf"$k$: {_month(k_date)}"),
         (data["targets"][index], rf"$k{{+}}1$ truth: {_month(kp1_date)}"),
-        (data["predictions"][index], rf"$k{{+}}1$ prediction"),
+        (data["predictions"][index], rf"$k{{+}}1$ {prediction_label(data)}"),
     )
 
     fig, axes = plt.subplots(1, 5, gridspec_kw={"width_ratios": [1, 1, 1, 1, 0.06]})
@@ -302,7 +336,7 @@ def plot_forecast_grid(data, out_dir, indices=None):
             _clean_image_axis(ax)
         if col == 0:
             ax_t.set_ylabel("truth")
-            ax_p.set_ylabel("prediction")
+            ax_p.set_ylabel(prediction_label(data))
     fig.colorbar(img, cax=fig.add_subplot(gs[:, n])).set_label("SIC", labelpad=4)
 
     savefig(fig, out_dir, "forecast_grid", width=TEXTWIDTH_IN, height=3.3)
@@ -333,7 +367,7 @@ def plot_forecast_rows(data, out_dir, indices, name: str):
     n = len(indices)
     fig = plt.figure()
     gs = fig.add_gridspec(n, 5, width_ratios=[1, 1, 1, 1, 0.06])
-    headers = (r"$k{-}1$", r"$k$", r"$k{+}1$ truth", r"$k{+}1$ prediction")
+    headers = (r"$k{-}1$", r"$k$", r"$k{+}1$ truth", rf"$k{{+}}1$ {prediction_label(data)}")
     for row, i in enumerate(indices):
         fields = (data["km1"][i], data["k"][i], data["targets"][i], data["predictions"][i])
         for col, field in enumerate(fields):
@@ -394,7 +428,8 @@ def plot_ice_edge_error(data, out_dir, indices: dict):
 
     handles = [
         Line2D([], [], color="black", linewidth=0.8, label="true ice edge"),
-        Line2D([], [], color="magenta", linewidth=0.8, label="predicted ice edge"),
+        Line2D([], [], color="magenta", linewidth=0.8,
+               label="ensemble-mean ice edge" if n_members(data) > 1 else "predicted ice edge"),
         Patch(facecolor="red", alpha=0.6, label=rf"squared error $> {ERROR_THRESHOLD}$"),
     ]
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3)
@@ -404,27 +439,60 @@ def plot_ice_edge_error(data, out_dir, indices: dict):
 
 
 def _water_mse(pred, target) -> float:
+    """MSE over water. ``pred`` may be [M, H, W]: then the mean over all members."""
     sq_err = (pred - target) ** 2
     return float(sq_err[np.isfinite(sq_err)].mean())
 
 
+def _water_mae(pred, target) -> float:
+    abs_err = np.abs(pred - target)
+    return float(abs_err[np.isfinite(abs_err)].mean())
+
+
+def _water_crps(members, target) -> float:
+    """Fair ensemble CRPS (Ferro 2014), averaged over water. members [M, H, W].
+
+    CRPS = mean_i |x_i - y| - sum_{i<j} |x_i - x_j| / (M (M - 1)). It rewards an ensemble
+    that is both close to the truth and spread as wide as its error, and is the MAE for a
+    single member, so it compares directly with the MAE of persistence and climatology.
+    """
+    water = np.isfinite(target) & np.isfinite(members).all(axis=0)
+    x = np.sort(members[:, water].astype(np.float64), axis=0)  # [M, P]
+    y = target[water].astype(np.float64)
+    m = x.shape[0]
+    skill = np.abs(x - y).mean(axis=0)
+    if m == 1:
+        return float(skill.mean())
+    # With the members sorted, sum_{i<j} |x_i - x_j| = sum_j (2j - M - 1) x_(j), j = 1..M.
+    spread = (2 * np.arange(1, m + 1) - m - 1) @ x / (m * (m - 1))
+    return float((skill - spread).mean())
+
+
 def sample_errors(data, climatology) -> pd.DataFrame:
     """One row per sample: its season (of the target month), the MSE over water of the
-    forecast, of persistence (forecast = k) and of climatology (mean of the target's
-    calendar month over the training years; NaN without a climatology), and the share of
-    water pixels whose squared error exceeds ERROR_THRESHOLD."""
+    forecast (the ensemble mean), of persistence (forecast = k) and of climatology (mean of
+    the target's calendar month over the training years; NaN without a climatology), and the
+    share of water pixels whose squared error exceeds ERROR_THRESHOLD.
+
+    Per ensemble: ``member_mse`` is the MSE of a single member, averaged over the members
+    (the same as ``mse`` for one member), and ``crps`` the ensemble CRPS, next to the MAE of
+    the two baselines (``persistence_mae``, ``climatology_mae``), which is their CRPS."""
     rows = []
-    for pred, target, k, dates in zip(data["predictions"], data["targets"], data["k"],
-                                      data["times"]):
+    for pred, members, target, k, dates in zip(data["predictions"], data["members"],
+                                               data["targets"], data["k"], data["times"]):
         sq_err = (pred - target) ** 2
         water = np.isfinite(sq_err)
         month = pd.Timestamp(dates[0]).month
+        clim = climatology.predict(month) if climatology is not None else None
         rows.append({
             "season": next(s for s, months in SEASONS.items() if month in months),
             "mse": float(sq_err[water].mean()),
+            "member_mse": _water_mse(members, target),
+            "crps": _water_crps(members, target),
             "persistence": _water_mse(k, target),
-            "climatology": (_water_mse(climatology.predict(month), target)
-                            if climatology is not None else np.nan),
+            "persistence_mae": _water_mae(k, target),
+            "climatology": _water_mse(clim, target) if clim is not None else np.nan,
+            "climatology_mae": _water_mae(clim, target) if clim is not None else np.nan,
             "large": float((sq_err[water] > ERROR_THRESHOLD).mean()),
         })
     return pd.DataFrame(rows)
@@ -445,29 +513,50 @@ def print_stats(data):
     exceeds ERROR_THRESHOLD (the red pixels in ice_edge_error)."""
     climatology = _load_climatology(data["targets"][0].shape)
     df = sample_errors(data, climatology)
+    m = n_members(data)
+    groups = [("all", df), *((s, df[df.season == s]) for s in ("cool", "melt"))]
+    groups = [(name, group) for name, group in groups if not group.empty]
 
     header = (f"{'':<6} {'n':>4} {'MSE (mean ± std)':>20} {'persistence MSE':>16} "
               f"{'climatology MSE':>16} {f'SE > {ERROR_THRESHOLD}':>10}")
-    print("\nMSE over water, per sample, averaged over samples")
+    print("\nMSE over water, per sample, averaged over samples"
+          + (f" (forecast = mean of {m} members)" if m > 1 else ""))
     print(header)
     print("-" * len(header))
-    for name, group in [("all", df), *((s, df[df.season == s]) for s in ("cool", "melt"))]:
-        if group.empty:
-            continue
+    for name, group in groups:
         mse = f"{group.mse.mean():.5f} ± {group.mse.std(ddof=0):.5f}"
         clim = f"{group.climatology.mean():.5f}" if climatology is not None else "-"
         print(f"{name:<6} {len(group):>4} {mse:>20} {group.persistence.mean():>16.5f} "
               f"{clim:>16} {group.large.mean():>10.2%}")
     print()
 
+    if m == 1:
+        return
+    header = (f"{'':<6} {'n':>4} {'member MSE':>11} {'CRPS':>9} {'persistence MAE':>16} "
+              f"{'climatology MAE':>16}")
+    print(f"Ensemble of {m} members over water: MSE of a single member (mean over members), "
+          f"and CRPS next to the baselines' MAE (their CRPS)")
+    print(header)
+    print("-" * len(header))
+    for name, group in groups:
+        clim = f"{group.climatology_mae.mean():.5f}" if climatology is not None else "-"
+        print(f"{name:<6} {len(group):>4} {group.member_mse.mean():>11.5f} "
+              f"{group.crps.mean():>9.5f} {group.persistence_mae.mean():>16.5f} {clim:>16}")
+    print()
+
 
 def plot_mse_by_lead(leads, out_dir):
     """MSE over water against lead time, averaged over all samples, with the climatology
-    baseline. Each point is the mean of the per-sample MSE, as in print_stats's "all" row."""
+    baseline. Each point is the mean of the per-sample MSE, as in print_stats's "all" row.
+    For an ensemble, both the ensemble mean and a single member (mean over members)."""
     climatology = _load_climatology(leads[0]["targets"][0].shape)
     lead_times = np.arange(1, len(leads) + 1)
     errors = [sample_errors(data, climatology) for data in leads]
-    series = [("mse", "model", COLORS[0], "o")]
+    if n_members(leads[0]) > 1:
+        series = [("mse", "ensemble mean", COLORS[0], "o"),
+                  ("member_mse", "single member", COLORS[1], "s")]
+    else:
+        series = [("mse", "model", COLORS[0], "o")]
     if climatology is not None:
         series.append(("climatology", "climatology", COLORS[3], "^"))
 
@@ -607,10 +696,15 @@ def make_loss_history(run, out_dir=None):
     print(f"Wrote {out_dir}/loss_history.pdf")
 
 
-def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None, lead: int = 1):
-    run_dir, leads = load_leads(path)
+def make_all(path, row_index: int = 0, grid_indices=None, edge_indices=None, lead: int = 1,
+             member: int | None = None):
+    run_dir, leads = load_leads(path, member)
     # Training history does not depend on --lead, so it goes next to the samples like calibration.
     make_loss_history(run_dir, run_dir)
+    if member is not None:
+        # One member of an ensemble: own directory, so the ensemble-mean figures are kept.
+        run_dir = run_dir / f"member{member}"
+        run_dir.mkdir(exist_ok=True)
     data = leads[lead - 1]
     out_dir = run_dir
     if lead > 1:
@@ -649,6 +743,9 @@ if __name__ == "__main__":
                         help="samples shown in ice_edge_error (default: first Mar and Sep)")
     parser.add_argument("--lead", type=int, default=1,
                         help="for a rollout, score the forecast of k+lead (figures go to lead<lead>/)")
+    parser.add_argument("--member", type=int, default=None,
+                        help="for an ensemble, score only this member instead of the ensemble mean "
+                             "(figures go to member<member>/)")
     parser.add_argument("--loss-only", action="store_true",
                         help="only draw loss_history (run name, run dir or loss_history.pkl; no samples.pkl needed)")
     args = parser.parse_args()
@@ -656,4 +753,4 @@ if __name__ == "__main__":
         make_loss_history(args.run)
     else:
         make_all(args.run, row_index=args.row_index, grid_indices=args.grid_indices,
-                 edge_indices=args.edge_indices, lead=args.lead)
+                 edge_indices=args.edge_indices, lead=args.lead, member=args.member)
