@@ -106,7 +106,7 @@ class TrainConfig:
     Training parameters and hyperparameters.
     """
     #DDPM or Unet
-    training_type: str = "unet" #"unet", "ddpm"
+    training_type: str = "ddpm" #"unet", "ddpm"
 
     #DDPM specific
     analysis_sampling: bool = False
