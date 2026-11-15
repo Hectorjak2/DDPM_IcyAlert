@@ -2,7 +2,7 @@
 
 ### General options ,gpua40, gpuv100, gpul40s, gpua100
 #BSUB -J l6_256
-#BSUB -q gpul40s
+#BSUB -q gpua100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
