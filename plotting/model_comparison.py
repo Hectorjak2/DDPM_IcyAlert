@@ -2,8 +2,8 @@
 
 Reads two ``samples.pkl`` (as ``plotting.evaluation``) and writes to ``--out``:
 
-1. ``calibration`` -- mean and interquartile range of the prediction per 0.01 target-SIC
-   bin for both models, one panel per lead time (2x3 for a six-month rollout).
+1. ``calibration`` -- reliability: mean and interquartile range of the target per 0.01
+   predicted-SIC bin for both models, one panel per lead time (2x3 for a six-month rollout).
 2. ``mse_by_lead`` -- MSE over water against lead time for both models, with the
    climatology baseline.
 
@@ -30,7 +30,7 @@ from plotting.evaluation import (MAX_CALIBRATION_COLS, _load_climatology, calibr
                                  load_leads, sample_errors)
 
 # One colour and marker per model, in the order the sample sets are given.
-MODEL_STYLES = [(COLORS[0], "o"), (COLORS[7], "D")]
+MODEL_STYLES = [(COLORS[0], "o"), (COLORS[2], "D")]
 BAND_ALPHA = 0.2  # two overlapping interquartile bands stay readable
 
 
@@ -45,7 +45,7 @@ def _check_dates(models):
 
 
 def plot_calibration(models, out_dir):
-    """Calibration per lead time with both models in each panel: mean as a line and
+    """Reliability per lead time with both models in each panel: mean as a line and
     interquartile range as a band in the model's colour. See
     ``plotting.evaluation.plot_calibration`` for why the quartiles rather than the std."""
     n = len(models[0][1])
@@ -73,12 +73,12 @@ def plot_calibration(models, out_dir):
             ax.set_title(f"Lead: {i + 1}")
 
         if c == 0:
-            ax.set_ylabel("predicted SIC")
+            ax.set_ylabel("target SIC")
         else:
             ax.tick_params(labelleft=False)
         # x axis labelled only on the lowest panel of each column
         if i + cols >= n:
-            ax.set_xlabel("target SIC")
+            ax.set_xlabel("predicted SIC")
         else:
             ax.tick_params(labelbottom=False)
 

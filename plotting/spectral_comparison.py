@@ -51,7 +51,7 @@ OUT_DIR = "figures"  # where the figure is written
 # else the folder name) contains "ensemble", ignoring case, are drawn solid, all other
 # runs dashed.
 TARGET_COLOR = "black"
-RUN_COLORS = [COLORS[i] for i in (0, 7, 1, 2, 3, 6)]
+RUN_COLORS = [COLORS[i] for i in (0, 2, 1, 3, 4, 5)]
 MODEL_ALPHA = 0.8
 
 # The WEST window inside the full-domain store (utils/prepare_west_zarr.py). Only the

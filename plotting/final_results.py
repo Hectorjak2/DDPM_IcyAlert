@@ -11,6 +11,12 @@ from the repo root:
 2. Writes ``<OUT_DIR>/mean_residual_comparison.pdf``: the mean residual k+1 - k per season
    (rows: cool, melt), one column per run and the true residual in the last column, all on
    one symmetric colour scale.
+3. Writes ``<OUT_DIR>/sampling_loss_comparison.pdf`` (half page width): the RMSE over water
+   per reverse step, averaged over samples, one curve per run. Runs can have different T, so
+   the x-axis is the normalised timestep t / T.
+4. Writes ``<OUT_DIR>/calibration_comparison.pdf`` (half page width, same height as 3, so the
+   two sit side by side): reliability, the mean target SIC per predicted-SIC bin, one
+   curve per run.
 
 Everything (runs, baselines, truth) is scored on the target dates that all runs share, so
 every row covers the same samples. Runs sampled with the same ``TrainConfig.sample_seed``
@@ -25,20 +31,22 @@ import numpy as np
 import pandas as pd
 
 from plotting.config import savefig, TEXTWIDTH_IN
+from plotting.config import MUTED, REF_LINESTYLE
 from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, _clean_image_axis,
-                                 _load_climatology, load_leads, mean_residuals, sample_errors)
+                                 _load_climatology, calibration_stats, load_leads,
+                                 mean_residuals, sample_errors)
 
 # Folder names under results/, in the order they appear in the table and the grid.
 RUNS = [
-    #"ddpm-corrected-land-32",
-    #"ddpm-corrected-land-64",
-    #"ddpm-corrected-land-128",
+    "ddpm-corrected-land-32",
+    "ddpm-corrected-land-64",
+    "ddpm-corrected-land-128",
     "ddpm-corrected-land-256",
-    #"ddpm-corrected-land-linear",
-    #"ddpm-corrected-land-cosine",
-    "ddpm-LC-256-ensemble",
-    "ensembles/member_5",
-    "deep-ensemble",
+    "ddpm-corrected-land-linear",
+    "ddpm-corrected-land-cosine",
+    #"ddpm-LC-256-ensemble",
+    #"ensembles/member_5",
+    #"deep-ensemble",
 
 ]
 # Optional display names; a run not listed here is shown by its folder name.
@@ -55,7 +63,7 @@ LABELS = {
 
 }
 LEAD = 1             # lead time to score; every run needs at least this many leads
-OUT_DIR = "figures"  # where the figure is written
+OUT_DIR = "final_figures"  # where the figures are written
 
 GROUPS = ("all", "cool", "melt")  # table columns
 GRID_SEASONS = ("cool", "melt")   # grid rows
@@ -90,12 +98,15 @@ def _subset(data, keep):
 
 
 def load_run(run: str, dates=None):
-    """Load one run and keep only what the table and grid need, so the (large) pickle can
-    be freed before the next one is loaded.
+    """Load one run and keep only what the table and figures need, so the (large) pickle
+    can be freed before the next one is loaded.
 
     With ``dates`` (a set of target dates), only the samples on those dates are scored.
-    Returns ``(errors, residuals, run_dates)``: the ``sample_errors`` DataFrame (with the
-    baselines), the ``mean_residuals`` dict and the target dates of the scored samples.
+    Returns a dict with ``run``; ``errors``, the ``sample_errors`` DataFrame (with the
+    baselines); ``residuals``, the ``mean_residuals`` dict; ``losses``, the RMSE over water
+    per reverse step averaged over the samples ([steps], None if the pickle has none);
+    ``calibration``, the ``calibration_stats`` tuple; and ``dates``, the target dates of the
+    scored samples.
     """
     _, leads = load_leads(run)
     if len(leads) < LEAD:
@@ -105,34 +116,41 @@ def load_run(run: str, dates=None):
     if dates is not None:
         data = _subset(data, [i for i, d in enumerate(data["times"])
                               if pd.Timestamp(d[0]) in dates])
-    errors = sample_errors(data, _climatology(data["targets"][0].shape))
-    residuals = mean_residuals(data)
-    run_dates = [pd.Timestamp(d[0]) for d in data["times"]]
-    return errors, residuals, run_dates
+    losses = data["sampling_losses"]
+    return {
+        "run": run,
+        "errors": sample_errors(data, _climatology(data["targets"][0].shape)),
+        "residuals": mean_residuals(data),
+        # Per-sample RMSE, then the mean over samples, as in print_rmse_table.
+        "losses": None if losses is None else np.sqrt(losses).mean(axis=0),
+        "calibration": calibration_stats(data),
+        "dates": [pd.Timestamp(d[0]) for d in data["times"]],
+    }
 
 
 def load_all(runs):
     """Load every run, one at a time, and score all of them on the dates they share.
 
-    Returns a list of ``(run, errors, residuals)``. The baselines depend only on the dates, so they are the same in every
-    ``errors``; the table and the truth column take them from the first run.
+    Returns a list of ``load_run`` dicts. The baselines depend only on the dates, so they
+    are the same in every ``errors``; the table and the truth column take them from the
+    first run.
     """
-    loaded = []  # (run, errors, residuals, dates)
+    loaded = []
     for run in runs:
         print(f"Loading {run} ...")
-        loaded.append((run, *load_run(run)))
+        loaded.append(load_run(run))
 
-    common = set.intersection(*(set(dates) for *_, dates in loaded))
+    common = set.intersection(*(set(r["dates"]) for r in loaded))
     if not common:
         raise ValueError("The runs share no target dates -- nothing to compare.")
 
     results = []
-    for run, errors, residuals, dates in loaded:
-        if set(dates) != common:
-            print(f"{run} has {len(set(dates))} dates, {len(common)} shared with all runs "
-                  f"-- reloading it on the shared dates only.")
-            errors, residuals, _ = load_run(run, common)
-        results.append((run, errors, residuals))
+    for r in loaded:
+        if set(r["dates"]) != common:
+            print(f"{r['run']} has {len(set(r['dates']))} dates, {len(common)} shared with "
+                  f"all runs -- reloading it on the shared dates only.")
+            r = load_run(r["run"], common)
+        results.append(r)
     return results
 
 
@@ -142,14 +160,14 @@ def _cell(rmse: pd.Series) -> str:
 
 def print_rmse_table(results):
     """Per-sample RMSE over water, mean ± std, for all samples and per season."""
-    reference = results[0][1]
+    reference = results[0]["errors"]
     # sample_errors leaves the column NaN when no climatology is fitted for the grid.
     has_climatology = reference.climatology.notna().any()
     rows = []  # (label, per-sample errors DataFrame, column holding the MSE)
     if has_climatology:
         rows.append(("Climatology", reference, "climatology"))
     rows.append(("Persistence", reference, "persistence"))
-    rows += [(_name(run), errors, "mse") for run, errors, _ in results]
+    rows += [(_name(r["run"]), r["errors"], "mse") for r in results]
 
     width = 19
     name_width = max(len(label) for label, _, _ in rows) + 2
@@ -177,15 +195,16 @@ def plot_mean_residual_grid(results, out_dir):
     """Mean residual k+1 - k: rows cool and melt, one column per run and the truth (from the
     first run) last, on one symmetric colour scale. Also prints the mean and RMS of
     predicted - true mean residual per run and season."""
-    truth = results[0][2]
+    truth = results[0]["residuals"]
     seasons = [s for s in GRID_SEASONS if s in truth]
     if not seasons:
         print("No cool- or melt-season samples -- skipping mean_residual_comparison.")
         return
 
     # Columns: (title, {season: field}); the truth is the true residual of the first run.
-    columns = [(_tex_name(run), {s: residuals[s][0] for s in seasons if s in residuals})
-               for run, _, residuals in results]
+    columns = [(_tex_name(r["run"]), {s: r["residuals"][s][0] for s in seasons
+                                      if s in r["residuals"]})
+               for r in results]
     columns.append(("Truth", {s: truth[s][1] for s in seasons}))
 
     # Fixed scale for all panels, so runs and seasons compare directly (and match mean_residual).
@@ -214,20 +233,82 @@ def plot_mean_residual_grid(results, out_dir):
         cbar.set_label("SIC change", labelpad=4)
 
     print("Mean residual, predicted - truth, over water:")
-    for run, _, residuals in results:
+    for r in results:
+        residuals = r["residuals"]
         parts = []
         for season in seasons:
             if season in residuals:
                 diff = residuals[season][0] - truth[season][1]
                 parts.append(f"{season}: mean {np.nanmean(diff):+.4f}, "
                              f"RMS {np.sqrt(np.nanmean(diff ** 2)):.4f}")
-        print(f"  {_name(run)}: " + " | ".join(parts))
+        print(f"  {_name(r['run'])}: " + " | ".join(parts))
     print()
 
     # Square panels: the width per column sets the height per row, plus room for titles.
     panel = TEXTWIDTH_IN / (n_cols + 0.3)
     savefig(fig, out_dir, "mean_residual_comparison", width=TEXTWIDTH_IN,
             height=panel * len(seasons) + 0.4)
+    plt.close(fig)
+
+
+def plot_sampling_loss_comparison(results, out_dir):
+    """RMSE over water per reverse step, averaged over samples, one curve per run.
+
+    Runs can use different numbers of diffusion steps T, so each curve is drawn against
+    t / T; sampling runs left to right, from t / T = 1 (pure noise) to 0."""
+    curves = [(r["run"], r["losses"]) for r in results if r["losses"] is not None]
+    for r in results:
+        if r["losses"] is None:
+            print(f"{r['run']} has no sampling losses -- left out of sampling_loss_comparison.")
+    if not curves:
+        print("No run has sampling losses -- skipping sampling_loss_comparison.")
+        return False
+
+    fig, ax = plt.subplots()
+    for run, losses in curves:
+        n_steps = len(losses)
+        # Entry 0 belongs to the noisiest step t = T-1 (see evaluation.plot_sampling_loss).
+        t = np.arange(n_steps - 1, -1, -1) / n_steps
+        ax.plot(t, losses, label=_tex_name(run), linewidth=1.25)
+    ax.set_xlim(1, 0)
+    # Fit the y-axis to the curves (they span ~0.20-0.32, so starting at 0 wasted most of
+    # the panel). The bottom is left ~40% of the data range below the lowest curve, rounded
+    # down to the 0.05 tick grid, so the legend fits under every curve.
+    lo = min(losses.min() for _, losses in curves)
+    hi = max(losses.max() for _, losses in curves)
+    tick = 0.05
+    ax.set_ylim(np.floor((lo - 0.4 * (hi - lo)) / tick) * tick, hi + 0.05 * (hi - lo))
+    ax.yaxis.set_major_locator(plt.MultipleLocator(tick))
+    ax.set_xlabel("normalised timestep $t/T$")
+    ax.set_ylabel("RMSE over water")
+    ax.legend(loc="lower left", ncol=2, handlelength=1.2, handletextpad=0.5,
+              columnspacing=0.8)
+
+    savefig(fig, out_dir, "sampling_loss_comparison", width=TEXTWIDTH_IN / 2, height=2.8)
+    plt.close(fig)
+    return True
+
+
+def plot_calibration_comparison(results, out_dir):
+    """Reliability: mean target SIC per predicted-SIC bin (pooled over all water pixels of
+    the shared samples), one curve per run, against the diagonal. Only the means: the interquartile bands
+    of ``evaluation.plot_calibration`` would overlap into a blur with several runs.
+
+    No legend: the curves leave no free corner, and the figure is meant to sit next to
+    sampling_loss_comparison, whose legend uses the same colours (both follow the default
+    colour cycle of plotting/config.py in RUNS order). The dashed diagonal
+    (perfect calibration) is left to the caption."""
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE)
+    for r in results:
+        centers, filled, (mean, _, _) = r["calibration"]
+        ax.plot(centers[filled], mean, label=_tex_name(r["run"]), linewidth=1.25)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("predicted SIC")
+    ax.set_ylabel("mean target SIC")
+
+    savefig(fig, out_dir, "calibration_comparison", width=TEXTWIDTH_IN / 2, height=2.8)
     plt.close(fig)
 
 
@@ -241,6 +322,10 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     plot_mean_residual_grid(results, out_dir)
     print(f"Wrote {out_dir}/mean_residual_comparison.pdf")
+    if plot_sampling_loss_comparison(results, out_dir):
+        print(f"Wrote {out_dir}/sampling_loss_comparison.pdf")
+    plot_calibration_comparison(results, out_dir)
+    print(f"Wrote {out_dir}/calibration_comparison.pdf")
 
 
 if __name__ == "__main__":

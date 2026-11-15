@@ -93,7 +93,7 @@ def _stats(mu_name: str, sigma_name: str, mu: float, sigma: float) -> str:
 def plot_data_distribution(h: dict, out_dir: str = "figures"):
     """Raw SIC and residual, in teal and orange."""
     mu, sigma, mu_r, sigma_r = h["sic_mean"], h["sic_std"], h["residual_mean"], h["residual_std"]
-    _plot_single(h, out_dir, "data_distribution_sic", h["sic"], SIC_BINS, muted(COLORS[0]),
+    _plot_single(h, out_dir, "data_distribution_sic", h["sic"], SIC_BINS, muted(COLORS[-1]),
                  r"SIC on day $k$", _stats(r"\mu", r"\sigma", mu, sigma))
     _plot_single(h, out_dir, "data_distribution_residual", h["residual"], RESIDUAL_BINS, muted(COLORS[1]),
                  r"residual $x_{k+1} - x_k$", _stats(r"\mu_r", r"\sigma_r", mu_r, sigma_r), ref=sigma_r)

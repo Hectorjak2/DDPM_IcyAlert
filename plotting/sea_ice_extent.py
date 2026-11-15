@@ -33,7 +33,7 @@ CELL_AREA_KM2 = 2.5 * 2.5
 SMOOTH_DAYS = 7
 CACHE = "results/sea_ice_extent_cropped.csv"
 
-TRAINING_COLOR, VALIDATION_COLOR, TEST_COLOR = COLORS[0], COLORS[7], COLORS[1]
+TRAINING_COLOR, VALIDATION_COLOR, TEST_COLOR = COLORS[0], COLORS[2], COLORS[1]
 
 
 def daily_extent(cache: str = CACHE, recompute: bool = False) -> pd.Series:

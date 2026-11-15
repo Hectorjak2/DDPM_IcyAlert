@@ -9,11 +9,11 @@ ddpm_conf = DDPMConfig()
 SCHEDULES = [
     Schedule("linear", beta_start=ddpm_conf.beta_start, beta_end=ddpm_conf.beta_end),
     Schedule("cosine"),
-    Schedule("shifted_cosine", cosine_shift_res=64),
-    Schedule("shifted_cosine", cosine_shift_res=128),
-    Schedule("shifted_cosine", cosine_shift_res=256),
-    Schedule("interpolated_cosine", cosine_shift_res=64, cosine_shift_res_t0=None),
-]
+    Schedule("shifted_cosine", name="Shifted cosine 32", cosine_shift_res=32),
+    Schedule("shifted_cosine", name="Shifted cosine 64", cosine_shift_res=64),
+    Schedule("shifted_cosine", name="Shifted cosine 128", cosine_shift_res=128),
+    Schedule("shifted_cosine", name="Shifted cosine 256", cosine_shift_res=256),
+    ]
 
 TIMESTEPS = 1000
 IMAGE_SIZE = 896  # CARRA2-WEST; sets the shifted cosine's delta, the others ignore it
@@ -51,12 +51,12 @@ def plot_schedule_comparison(schedules: dict, name: str = "schedule_comparison",
     axes[1].set_ylim(-12, 12)
     for ax in axes:
         ax.set_xlabel("timestep $t$")
-    # The parameter labels are too long for one panel, so the legend spans both above them
+    # Six entries crowd one panel, so the legend spans both above them
     # Zero padding and tight spacing keep it hugging the panels instead of floating above them
     fig.legend(
         *axes[0].get_legend_handles_labels(),
         loc="lower center",
-        ncol=2,
+        ncol=3,
         bbox_to_anchor=(0.5, 0.97),
         borderaxespad=0,
         borderpad=0,
@@ -70,4 +70,4 @@ def plot_schedule_comparison(schedules: dict, name: str = "schedule_comparison",
 
 
 if __name__ == "__main__":
-    plot_schedule_comparison({s.label(IMAGE_SIZE): s.build(TIMESTEPS, IMAGE_SIZE) for s in SCHEDULES})
+    plot_schedule_comparison({s.name: s.build(TIMESTEPS, IMAGE_SIZE) for s in SCHEDULES})

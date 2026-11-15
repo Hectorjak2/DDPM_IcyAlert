@@ -4,7 +4,7 @@ Reads ``results/<run>/samples.pkl`` written by
 ``utils.sampling.forecast`` (``--lead L`` for a rollout) and writes four PDFs next to it:
 
 1. ``sampling_loss``  -- MSE against the target per reverse step, averaged over samples.
-2. ``calibration``    -- mean predicted SIC per 0.01 target-SIC bin (over/under-prediction),
+2. ``calibration``    -- reliability: mean target SIC per 0.01 predicted-SIC bin,
    one panel per lead time (2x3 for a six-month rollout), always next to the pickle.
 3. ``forecast_row``   -- k-1, k, k+1 (truth) and prediction for one sample.
 4. ``forecast_grid``  -- truth (top) vs prediction (bottom) for four samples.
@@ -63,7 +63,7 @@ RESIDUAL_CMAP.set_bad("lightgray")
 # the 2024 forecast dates; anything beyond the limit is clipped (arrow ends on the colorbar).
 RESIDUAL_VMAX = 0.3
 
-N_BINS = 100  # 0.01-wide target-SIC bins for the calibration plot
+N_BINS = 100  # 0.01-wide predicted-SIC bins for the reliability (calibration) plot
 MIN_BIN_PIXELS = 100  # bins with fewer pixels are left out of the calibration curves
 MAX_CALIBRATION_COLS = 3  # lead-time panels per row in the calibration grid
 
@@ -211,7 +211,8 @@ def plot_sampling_loss(data, out_dir):
 
 
 def calibration_stats(data):
-    """Prediction per target-SIC bin, pooled over all water pixels of all samples.
+    """Reliability: the target per predicted-SIC bin, pooled over all water pixels of all
+    samples. With an ensemble the prediction is the ensemble mean.
 
     Returns (centers, filled, (mean, q25, q75)), the statistics only over the bins in
     ``filled``.
@@ -221,34 +222,37 @@ def calibration_stats(data):
     valid = np.isfinite(target) & np.isfinite(pred)
     target, pred = target[valid], pred[valid]
 
-    # SIC exactly 1.0 goes in the last bin rather than a 101st one.
-    bins = np.clip((target * N_BINS).astype(np.int64), 0, N_BINS - 1)
+    # Bin on the prediction (reliability, E[y | ŷ]), not on the target: conditioning on the
+    # target gives E[ŷ | y], which flattens towards the middle even for a perfectly reliable
+    # forecast (regression to the mean, strongest for the smooth ensemble mean).
+    # SIC exactly 1.0 (or a prediction just outside [0, 1]) goes in an end bin.
+    bins = np.clip((pred * N_BINS).astype(np.int64), 0, N_BINS - 1)
     counts = np.bincount(bins, minlength=N_BINS)
-    # Group predictions by bin with one sort instead of a boolean mask per bin.
-    per_bin = np.split(pred[np.argsort(bins, kind="stable")], np.cumsum(counts)[:-1])
+    # Group targets by bin with one sort instead of a boolean mask per bin.
+    per_bin = np.split(target[np.argsort(bins, kind="stable")], np.cumsum(counts)[:-1])
     stats = np.full((N_BINS, 3), np.nan)  # mean, q25, q75
-    for k, p in enumerate(per_bin):
-        if p.size:
-            stats[k] = [p.mean(), *np.percentile(p, [25, 75])]
+    for k, y in enumerate(per_bin):
+        if y.size:
+            stats[k] = [y.mean(), *np.percentile(y, [25, 75])]
     centers = (np.arange(N_BINS) + 0.5) / N_BINS
 
-    # CARRA2 has (almost) no SIC between 0 and ~0.05, which leaves the 0-0.01 bin -- the
-    # bulk of all water pixels -- isolated between empty bins, and a line does not draw
-    # through NaNs. Curves therefore run through the populated bins only, bridging the gap.
-    # Bins with only a handful of pixels are bridged too: their quantiles are noise and draw
-    # spurious kinks.
+    # Most water pixels are predicted ~0, and a forecast that mimics CARRA2 has (almost) no
+    # SIC between 0 and ~0.05, which can leave the 0-0.01 bin isolated between empty bins;
+    # a line does not draw through NaNs. Curves therefore run through the populated bins
+    # only, bridging any gap. Bins with only a handful of pixels are bridged too: their
+    # quantiles are noise and draw spurious kinks.
     filled = counts >= MIN_BIN_PIXELS
     return centers, filled, stats[filled].T
 
 
 def plot_calibration(leads, out_dir):
-    """Calibration per lead time: for each lead, the prediction per target-SIC bin. One
+    """Reliability per lead time: for each lead, the target per predicted-SIC bin. One
     panel per lead, at most MAX_CALIBRATION_COLS per row (1x1 for a one-month forecast, 2x3
     for a six-month rollout), titled with the lead.
 
-    Shows mean and interquartile range rather than mean +- std: within a bin the
-    predictions are bimodal (a misplaced ice edge gives ~0 or ~1 where the target is
-    intermediate), so the std sits near its 0/1-mixture maximum in every bin and says
+    Shows mean and interquartile range rather than mean +- std: within a bin the targets
+    are bimodal (an intermediate prediction near the ice edge mostly falls on open water
+    or on pack ice), so the std sits near its 0/1-mixture maximum in every bin and says
     little, while the quartiles show the split.
     """
     n = len(leads)
@@ -277,12 +281,12 @@ def plot_calibration(leads, out_dir):
             ax.set_title(f"Lead: {i + 1}")
 
         if c == 0:
-            ax.set_ylabel("predicted SIC")
+            ax.set_ylabel("target SIC")
         else:
             ax.tick_params(labelleft=False)
         # x axis labelled only on the lowest panel of each column
         if i + cols >= n:
-            ax.set_xlabel("target SIC")
+            ax.set_xlabel("predicted SIC")
         else:
             ax.tick_params(labelbottom=False)
 

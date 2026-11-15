@@ -9,9 +9,11 @@ TEXTWIDTH_IN = 448.13 / 72.27
 # Thesis body font size (10pt)
 FONTSIZE = 10
 
-# Palette: teal, amber, steel blue, coral, charcoal, light gray, periwinkle, plum
-# (also the default colour cycle; ordered so the first few series stay well separated)
-COLORS = ["#00AB86", "#FF8D00", "#F86748","#4E7693", "#B7B7B7", "#69747D", "#8A99B0", "#9C5B9E"]
+# Palette: three dark/pale pairs -- deep indigo / pale pink, olive green / pale canary,
+# peacock blue / pale blue. Also the default colour cycle: the dark tones come first so plain
+# ax.plot calls get the colours that read as lines; COLORS[i + 3] is the pale partner of
+# COLORS[i] (suited to fills and bands, faint as thin lines on white).
+COLORS = ["#A4A4A4", "#97B600", "#007997", "#0068B3", "#68D7FF","#9601BF"]
 # Per-series markers so curves stay distinguishable in grayscale / for colour-blind readers
 MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 # Soft neutrals
