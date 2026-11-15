@@ -132,7 +132,7 @@ class TrainConfig:
     lr: float = 3e-4
     number_of_samples: int = 100
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
-    lead_months: int = 6  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
+    lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = False 
     weights: str = "ddpm-corrected-land-256/final_weights.pth"
