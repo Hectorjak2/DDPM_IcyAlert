@@ -5,9 +5,10 @@ from the repo root:
 
     python -m plotting.final_results
 
-1. Prints the per-sample RMSE over water, mean ± std over the samples, for all samples and
+1. Prints the per-sample RMSE over water, mean ± standard error over the samples, for all samples and
    per season (cool Oct--Mar, melt Apr--Sep). Climatology and persistence come first, then
-   one row per run in ``RUNS`` order.
+   one row per run in ``RUNS`` order. Then a paired t-test on the per-date RMSE for each
+   pair in ``PAIRED_TESTS``.
 2. Writes ``<OUT_DIR>/mean_residual_comparison.pdf``: the mean residual k+1 - k per season
    (rows: cool, melt), one column per run and the true residual in the last column, all on
    one symmetric colour scale.
@@ -21,6 +22,10 @@ from the repo root:
    ``<OUT_DIR>/calibration_seasons.pdf``, the reliability of 4 with one curve per season, and
    ``<OUT_DIR>/spread_skill_seasons.pdf``, the binned spread-skill diagram of
    ``plotting.ensemble_comparison`` with one line per season.
+6. Writes ``<OUT_DIR>/lead_time_comparison.pdf`` (square, half width, log y-axis): the RMSE over water against
+   lead time for the six-month rollouts in ``LEAD_RUNS``, next to persistence and
+   climatology, and prints the numbers. ``python -m plotting.final_results --lead-only``
+   writes only this figure.
 
 Everything (runs, baselines, truth) is scored on the target dates that all runs share, so
 every row covers the same samples. Runs sampled with the same ``TrainConfig.sample_seed``
@@ -31,6 +36,7 @@ from functools import cache
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
@@ -45,11 +51,11 @@ RUNS = [
     #"ddpm-corrected-land-32",
     #"ddpm-corrected-land-64",
     #"ddpm-corrected-land-128",
-    "ddpm-corrected-land-256",
+    #"ddpm-corrected-land-256",
     #"ddpm-corrected-land-linear",
     #"ddpm-corrected-land-cosine",
     "ddpm-LC-256-ensemble-v3",
-    "ensembles/member_5",
+    #"ensembles/member_5",
     "deep-ensemble2",
 
 ]
@@ -62,23 +68,37 @@ LABELS = {
     "ddpm-corrected-land-32": "Shift (32)",
     "ddpm-corrected-land-cosine": "Cosine",
     "ensembles/member_5": "U-Net, member",
-    "deep-ensemble": "U-Net Ensemble, mean",
+    "deep-ensemble2": "U-Net Ensemble, mean",
     "ddpm-LC-256-ensemble": "DDPM Ensemble, mean"
 
 }
 # Legend labels for calibration_comparison only, where a long label would run into the
 # curves in the upper-left legend; runs not listed use LABELS.
 CALIBRATION_LABELS = {
-    "deep-ensemble": "U-Net Ensemble,\nmean",
+    "deep-ensemble2": "U-Net Ensemble,\nmean",
 }
 # The ensemble whose cool and melt seasons are compared in calibration_seasons and
 # spread_skill_seasons (must be in RUNS); None skips both figures.
-SEASON_RUN = "ddpm-LC-256-ensemble"
+SEASON_RUN = "ddpm-LC-256-ensemble-v3"
 # Curve order (legend order) and colour per season in those two figures.
 SEASON_ORDER = ("cool", "melt")
 SEASON_COLORS = {"cool": COLORS[6], "melt": COLORS[2]}
 LEAD = 1             # lead time to score; every run needs at least this many leads
+# Paired t-tests on the per-date RMSE (A - B), printed after the RMSE table. Each entry is a
+# run in RUNS or a baseline, "climatology" or "persistence".
+PAIRED_TESTS = [
+    ("ensembles/member_5", "ddpm-corrected-land-256"),
+    ("ddpm-corrected-land-256", "climatology"),
+    ("ensembles/member_5", "climatology"),
+]
 OUT_DIR = "final_figures"  # where the figures are written
+# Six-month rollouts compared in lead_time_comparison, {folder under results/: label}.
+# Scored on the initial dates k they all share; the baselines come from the first run.
+# Empty skips the figure.
+LEAD_RUNS = {
+    "ddpm-corrected-land-256-l6": "DDPM",
+    "ensembles/member_0": "U-Net",
+}
 
 GROUPS = ("all", "cool", "melt")  # table columns
 GRID_SEASONS = ("cool", "melt")   # grid rows
@@ -191,11 +211,18 @@ def load_all(runs):
 
 
 def _cell(rmse: pd.Series) -> str:
-    return f"{rmse.mean():.4f} ± {rmse.std(ddof=0):.4f}"
+    """Mean ± standard error of the mean, std / sqrt(n) with the sample std (ddof=1).
+    The SE treats the dates as independent; nearby daily dates are correlated, so it is
+    somewhat too small. Overlapping SEs do not decide whether two models differ: they are
+    scored on the same dates, so compare them with a paired test on the per-date differences."""
+    n = len(rmse)
+    se = rmse.std(ddof=1) / np.sqrt(n) if n > 1 else np.nan
+    return f"{rmse.mean():.4f} ± {se:.4f}"
 
 
 def print_rmse_table(results):
-    """Per-sample RMSE over water, mean ± std, for all samples and per season."""
+    """Per-sample RMSE over water, mean ± standard error of the mean, for all samples and
+    per season."""
     reference = results[0]["errors"]
     # sample_errors leaves the column NaN when no climatology is fitted for the grid.
     has_climatology = reference.climatology.notna().any()
@@ -213,7 +240,7 @@ def print_rmse_table(results):
         headers.append(f"{group} (n={n})")
     header = f"{'':<{name_width}}" + "".join(f"{h:>{width}}" for h in headers)
 
-    print(f"\nRMSE over water (lead {LEAD}), per sample: mean ± std")
+    print(f"\nRMSE over water (lead {LEAD}), per sample: mean ± standard error (std / sqrt(n))")
     print(header)
     print("-" * len(header))
     for label, errors, column in rows:
@@ -225,6 +252,57 @@ def print_rmse_table(results):
     if not has_climatology:
         print("(no climatology for this grid -- row left out)")
     print()
+
+
+BASELINES = ("climatology", "persistence")
+
+
+def _per_date_rmse(results, name: str) -> pd.Series:
+    """Per-sample RMSE over water of a run in ``results`` or a baseline (taken from the first
+    run), indexed by target date. A date drawn twice is averaged, so every date counts once and
+    two series pair up by date."""
+    run = results[0] if name in BASELINES else next(r for r in results if r["run"] == name)
+    column = name if name in BASELINES else "mse"
+    rmse = pd.Series(np.sqrt(run["errors"][column].to_numpy()), index=run["dates"])
+    season = pd.Series(run["errors"]["season"].to_numpy(), index=run["dates"])
+    return rmse.groupby(level=0).mean(), season.groupby(level=0).first()
+
+
+def print_paired_tests(results):
+    """Paired t-test per pair in PAIRED_TESTS, for all dates and per season: the per-date
+    difference d = RMSE_A - RMSE_B, its mean ± standard error s_d / sqrt(n), t = mean / SE
+    (df = n - 1) and the two-sided p-value. d < 0 means A has the lower RMSE.
+
+    The dates are treated as independent; nearby daily dates are correlated, so the real n is
+    smaller and the p-values are somewhat optimistic."""
+    from scipy import stats
+
+    def name(x):
+        return x.capitalize() if x in BASELINES else _name(x)
+
+    print(f"Paired t-test on per-date RMSE over water (lead {LEAD}), d = A - B "
+          f"(d < 0: A better)")
+    width = 44
+    pad = max(len(name(a) + " vs " + name(b)) for a, b in PAIRED_TESTS) + 2
+    print(f"{'A vs B':<{pad}}" + "".join(f"{g:>{width}}" for g in GROUPS))
+    print("-" * (pad + width * len(GROUPS)))
+    for a, b in PAIRED_TESTS:
+        (rmse_a, season), (rmse_b, _) = _per_date_rmse(results, a), _per_date_rmse(results, b)
+        rmse_a, rmse_b = rmse_a.align(rmse_b, join="inner")
+        season = season.reindex(rmse_a.index)
+        cells = []
+        for group in GROUPS:
+            keep = season.index if group == "all" else season.index[season == group]
+            d = (rmse_a - rmse_b)[keep]
+            n = len(d)
+            if n < 2:
+                cells.append("-")
+                continue
+            se = d.std(ddof=1) / np.sqrt(n)
+            t, p = stats.ttest_rel(rmse_a[keep], rmse_b[keep])
+            cells.append(f"{d.mean():+.4f} ± {se:.4f}  t={t:+5.1f}  p={p:.0e}  n={n}")
+        print(f"{name(a) + ' vs ' + name(b):<{pad}}" + "".join(f"{c:>{width}}" for c in cells))
+    print("n = distinct target dates (a date drawn twice counts once)\n")
 
 
 def plot_mean_residual_grid(results, out_dir):
@@ -407,7 +485,7 @@ def plot_spread_skill_seasons(seasons, out_dir):
     ax.set_ylim(0, top)
     ax.set_aspect("equal")
     ax.set_xlabel("RMSE of ensemble mean")
-    ax.set_ylabel(r"Spread $\times \sqrt{(M+1)/M}$")
+    ax.set_ylabel("Ensemble spread")
     ax.legend(loc="upper left")
     savefig(fig, out_dir, "spread_skill_seasons", width=TEXTWIDTH_IN / 2, height=3.0)
     plt.close(fig)
@@ -433,14 +511,102 @@ def plot_season_figures(results, out_dir):
     print(f"Wrote {out_dir}/spread_skill_seasons.pdf")
 
 
-def main():
+def lead_errors(run: str) -> pd.DataFrame:
+    """Per-sample errors of a rollout at every lead: the ``sample_errors`` rows of each lead,
+    with ``lead`` (1 first) and ``init``, the initial date k, so runs can be matched on k.
+    Only the errors are kept, so the (large) pickle can be freed before the next run."""
+    _, leads = load_leads(run)
+    climatology = _climatology(leads[0]["targets"][0].shape)
+    frames = []
+    for lead, data in enumerate(leads, start=1):
+        df = sample_errors(data, climatology)
+        df["lead"] = lead
+        df["init"] = [pd.Timestamp(d[1]) for d in data["times"]]
+        frames.append(df)
+    del leads
+    return pd.concat(frames, ignore_index=True)
+
+
+def plot_lead_time_comparison(out_dir):
+    """RMSE over water against lead time (months) for every run in LEAD_RUNS, next to
+    persistence (forecast k+L = k) and climatology (mean of the k+L calendar month). Each
+    point is the mean of the per-sample RMSE over the initial dates all runs share, as in
+    print_rmse_table; the baselines are taken from the first run. Also prints the table."""
+    errors = {}
+    for run in LEAD_RUNS:
+        print(f"Loading {run} (all leads) ...")
+        errors[run] = lead_errors(run)
+    n_leads = min(df.lead.max() for df in errors.values())
+    common = set.intersection(*(set(df.init) for df in errors.values()))
+    if not common:
+        raise ValueError("LEAD_RUNS share no initial dates -- nothing to compare.")
+    for run, df in errors.items():
+        if set(df.init) != common:
+            print(f"{run} has {df.init.nunique()} initial dates, {len(common)} shared -- "
+                  f"scoring the shared ones only.")
+        errors[run] = df[df.init.isin(common) & (df.lead <= n_leads)]
+
+    def rmse_by_lead(df, column):
+        return np.sqrt(df[column]).groupby(df.lead).mean().to_numpy()
+
+    reference = next(iter(errors.values()))
+    # (label, RMSE per lead, colour, linestyle): models solid, baselines dashed grey.
+    series = [(label, rmse_by_lead(errors[run], "mse"), _family_color(label.lower()), "-")
+              for run, label in LEAD_RUNS.items()]
+    series.append(("Persistence", rmse_by_lead(reference, "persistence"), COLORS[5], "--"))
+    if reference.climatology.notna().any():
+        series.append(("Climatology", rmse_by_lead(reference, "climatology"), COLORS[3], "--"))
+
+    lead_times = np.arange(1, n_leads + 1)
+    print(f"\nRMSE over water by lead time ({len(common)} initial dates), mean over samples")
+    print(f"{'':<13}" + "".join(f"{f'lead {L}':>9}" for L in lead_times))
+    for label, rmse, _, _ in series:
+        print(f"{label:<13}" + "".join(f"{v:>9.4f}" for v in rmse))
+    print()
+
+    fig, ax = plt.subplots()
+    for (label, rmse, color, linestyle), marker in zip(series, MARKERS):
+        ax.plot(lead_times, rmse, label=label, color=color, linestyle=linestyle,
+                marker=marker, markersize=3.5, linewidth=1.25)
+    ax.set_xticks(lead_times)
+    ax.set_xlabel("lead time (months)")
+    ax.set_ylabel("RMSE over water")
+    # Log scale: the models and climatology sit close together (~0.15-0.3) while persistence
+    # climbs to ~0.6; a log axis keeps both readable. Plain decimal labels on a fixed grid.
+    ax.set_yscale("log")
+    lo = min(rmse.min() for _, rmse, _, _ in series)
+    hi = max(rmse.max() for _, rmse, _, _ in series)
+    ax.set_ylim(lo / 1.08, hi * 1.08)
+    ticks = [t for t in (0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0)
+             if lo / 1.08 <= t <= hi * 1.08]
+    ax.yaxis.set_major_locator(mticker.FixedLocator(ticks))
+    ax.yaxis.set_major_formatter(mticker.FixedFormatter([f"${t:g}$" for t in ticks]))
+    ax.yaxis.set_minor_locator(mticker.NullLocator())
+    # Above the axes, so it never covers a point; two columns fit the half width.
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2,
+              handlelength=1.6, handletextpad=0.4, columnspacing=0.9)
+
+    # Square, half the text width.
+    savefig(fig, out_dir, "lead_time_comparison", width=TEXTWIDTH_IN / 2,
+            height=TEXTWIDTH_IN / 2)
+    plt.close(fig)
+
+
+def main(lead_only: bool = False):
+    out_dir = Path(OUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if LEAD_RUNS:
+        plot_lead_time_comparison(out_dir)
+        print(f"Wrote {out_dir}/lead_time_comparison.pdf")
+    if lead_only:
+        return
+
     if not RUNS:
         raise ValueError("RUNS is empty -- list the folders under results/ to compare.")
     results = load_all(RUNS)
     print_rmse_table(results)
+    #print_paired_tests(results)
 
-    out_dir = Path(OUT_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
     plot_mean_residual_grid(results, out_dir)
     print(f"Wrote {out_dir}/mean_residual_comparison.pdf")
     if plot_sampling_loss_comparison(results, out_dir):
@@ -451,4 +617,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(lead_only="--lead-only" in sys.argv)

@@ -368,7 +368,7 @@ def plot_spread_skill(scores, out_dir):
     ax.set_ylim(0, top)
     ax.set_aspect("equal")
     ax.set_xlabel("RMSE of ensemble mean")
-    ax.set_ylabel(r"Spread $\times \sqrt{(M+1)/M}$")
+    ax.set_ylabel("Ensemble spread")
     ax.legend(loc="upper left")
     savefig(fig, out_dir, "ensemble_spread_skill", width=TEXTWIDTH_IN / 2, height=3.0)
     plt.close(fig)

@@ -104,7 +104,8 @@ def sample_ensemble(ens_cfg: EnsembleConfig, train_cfg: TrainConfig, unet_cfg: U
 
     dump_ensemble_snapshot(ens_cfg, train_cfg, unet_cfg, ddpm_cfg, getattr(forecaster, "ddpm", None))
     forecast(forecaster, test_ds, member_seeds, train_cfg.number_of_samples, train_cfg.sample_seed,
-             Path(train_cfg.samples_dir) / ens_cfg.experiment_name / "ensemble_samples.pkl")
+             Path(train_cfg.samples_dir) / ens_cfg.experiment_name / "ensemble_samples.pkl",
+             mean_only=ens_cfg.mean_only)
 
 
 if __name__ == "__main__":

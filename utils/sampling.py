@@ -217,10 +217,15 @@ def rollout(forecaster: Forecaster, context: torch.Tensor, month: int, member: i
 
 
 @torch.no_grad()
-def forecast(forecaster: Forecaster, test_ds: CARRA2Forecast, member_seeds: list[int], n_dates: int, sample_seed: int, out_path: Path):
+def forecast(forecaster: Forecaster, test_ds: CARRA2Forecast, member_seeds: list[int], n_dates: int, sample_seed: int, out_path: Path,
+             mean_only: bool = False):
     """
     Roll out test_ds.lead_months months from n_dates test dates, once per seed in member_seeds,
     and pickle the result to out_path after every date (see the module docstring for the layout).
+
+    mean_only stores only the ensemble mean, as a single member ([1, lead_months, H, W] per date),
+    so a long many-member rollout fits in memory (10 members x 6 leads x 100 dates at 896x896 is
+    ~19 GB). The pickle then reads like a single forecast: no spread, rank histogram or CRPS.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +251,9 @@ def forecast(forecaster: Forecaster, test_ds: CARRA2Forecast, member_seeds: list
             members.append(rollout(forecaster, context, month, seed, test_ds.lead_months,
                                    target[:1] if i == 0 else None).cpu())
 
-        samples.append(torch.stack(members))  # [n_members, lead_months, H, W]
+        members = torch.stack(members)  # [n_members, lead_months, H, W]
+        # Land is NaN in every member, so the plain mean keeps it NaN.
+        samples.append(members.mean(dim=0, keepdim=True) if mean_only else members)
         targets.append(target.cpu())
         contexts.append(context.cpu())
         sampling_losses.append(forecaster.sampling_loss)
@@ -255,7 +262,8 @@ def forecast(forecaster: Forecaster, test_ds: CARRA2Forecast, member_seeds: list
         losses = sampling_losses if forecaster.sampling_loss is not None else None
         pickle.dump((samples, contexts, targets, times, member_seeds, losses), open(out_path, "wb"))
 
-    print(f"Wrote {len(samples)} dates x {len(member_seeds)} members x {test_ds.lead_months} leads to {out_path}")
+    stored = "the mean of " if mean_only else ""
+    print(f"Wrote {len(samples)} dates x {stored}{len(member_seeds)} members x {test_ds.lead_months} leads to {out_path}")
 
 
 def download_samples(ddpm: DDPM, model, train_cfg: TrainConfig, n_of_samples: int = 10):
