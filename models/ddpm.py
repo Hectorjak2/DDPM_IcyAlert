@@ -187,14 +187,16 @@ class DDPM:
 
         return xt
 
-    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor): 
+    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, backward: bool = False):
         """
-        Compute the loss for the DDPM model. 
+        Compute the loss for the DDPM model.
 
         Args:
             model: The U-Net model.
             x0: Original image tensor of shape [B, C, H, W].
             t: Timesteps tensor of shape [B].
+            backward: Call backward on the loss here and return it detached (see
+                ConditionalDDPM.compute_loss for why the training loop does it this way).
         """
 
         # Replace NaNs so they don't propagate through the conv layers and
@@ -214,6 +216,9 @@ class DDPM:
         se = (predicted_noise - noise) ** 2
         loss = se[self.water_mask.expand_as(se)].mean()
 
+        if backward:
+            loss.backward()
+            return loss.detach()
         return loss
 
     @torch.no_grad()
@@ -274,8 +279,9 @@ class DDPM:
     # Number of timestep buckets for per-t loss reporting: how well the model does at high vs low t.
     N_BUCKETS = 5
 
-    def _batch_loss(self, model, batch, device, timesteps: int):
-        """Loss of one dataloader batch at t ~ U(0, T), as in training. Returns (loss, t)."""
+    def _batch_loss(self, model, batch, device, timesteps: int, backward: bool = False):
+        """Loss of one dataloader batch at t ~ U(0, T), as in training. Returns (loss, t).
+        With backward, the gradients are accumulated here and the loss comes back detached."""
         # Conditional datasets yield (context, month); others a bare tensor.
         month = None
         if isinstance(batch, (list, tuple)):
@@ -283,8 +289,8 @@ class DDPM:
             month = month.to(device)
         batch = batch.to(device)
         t = torch.randint(0, timesteps, (batch.shape[0],), device=device).long()
-        loss = (self.compute_loss(model, batch, t) if month is None
-                else self.compute_loss(model, batch, t, month))
+        loss = (self.compute_loss(model, batch, t, backward=backward) if month is None
+                else self.compute_loss(model, batch, t, month, backward=backward))
         return loss, t
 
     @classmethod
@@ -368,7 +374,8 @@ class DDPM:
             for batch in pbar:
                 optimizer.zero_grad()
 
-                loss, t = self._batch_loss(model, batch, device, timesteps)
+                # Backward runs inside compute_loss (per loss term for the unfolded loss).
+                loss, t = self._batch_loss(model, batch, device, timesteps, backward=True)
 
                 total += loss.item() * t.shape[0]
                 n += t.shape[0]
@@ -378,7 +385,6 @@ class DDPM:
                 bucket_sum[bucket] += loss.item()
                 bucket_count[bucket] += 1
 
-                loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
 
@@ -451,33 +457,38 @@ class ConditionalDDPM(DDPM):
         context_residual = ((context[:, 0] - context[:, 1]) / self.residual_std).unsqueeze(1)
         return context_residual
 
-    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor): 
+    def compute_loss(self, model, x0: torch.Tensor, t: torch.Tensor, month: torch.Tensor, backward: bool = False):
         """
-        Compute the loss for the DDPM model. 
+        Compute the loss for the DDPM model.
 
         Args:
             model: The U-Net model.
             x0: Original image tensor of shape [B, C, H, W].
             t: Timesteps tensor of shape [B].
             month: Month (0-11) of the target k+1, shape [B].
+            backward: Call backward here and return the loss detached. For the unfolded loss
+                each term is backpropagated as soon as it exists, so the first pass's
+                activations are freed before the second pass and peak memory matches a
+                plain run. This is exact because the simulated step is detached, so the
+                terms share no graph, and the gradients sum in .grad.
         """
 
         # Replace NaNs so they don't propagate through the conv layers and
         # contaminate the predictions at valid pixels
         x0 = torch.nan_to_num(x0, nan=0.0) #k+1, k, k-1
         s = self.residual_std
-        x0_residual = (x0[:,0] - x0[:,1]) / s #k+1 - k residual, standardized
+        target = (x0[:,0] - x0[:,1]) / s #k+1 - k residual, standardized 
 
         selected_context = self.build_context(x0[:, 1:])  # see DDPMConfig.residual_context
 
         # Sample x_t using the forward diffusion process, keeping the noise target
-        noise = torch.randn_like(x0_residual.unsqueeze(1))
+        noise = torch.randn_like(target.unsqueeze(1))
         # Input perturbation (TrainConfig.input_perturbation): x_t from slightly perturbed noise, so the
         # network learns to recover x_0 from the off-process x_t the sampling chain produces. Training
         # only, like DOSE. The target is x_0, so the perturbed noise is never a target.
         if self.input_perturbation and model.training:
             noise = noise + self.input_perturbation * torch.randn_like(noise)
-        xt = self.q_sample(x0_residual.unsqueeze(1), t, noise) #Only noising the residual
+        xt = self.q_sample(target.unsqueeze(1), t, noise) #Only noising the residual
 
         #reconstructing the input to be [xt, k - (k-1)]
         # DOSE only while training: the validation loss should measure the real task.
@@ -495,8 +506,17 @@ class ConditionalDDPM(DDPM):
         w = snr.clamp(min=1.0, max=5.0).view(-1, 1, 1, 1)   # truncated-SNR, capped as in min-SNR-γ
 
 
-        # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];        
+        # Mean squared error over masked (water) pixels only. water_mask is [1, 1, H, W];
+        # expanded to the batch since boolean-mask indexing needs an exact shape match.
+        target_x0 = target.unsqueeze(1)
+        mask = self.water_mask.expand_as(predicted_x0_residual)
+
         if self.unfolded and (t > 0).all():
+            # Same mask for both terms, so 0.5 * (mean(a) + mean(b)) == mean(0.5 * (a + b)).
+            loss1 = 0.5 * (w * (predicted_x0_residual - target_x0) ** 2)[mask].mean()
+            if backward:
+                loss1.backward()  # frees the first pass's activations before the second pass
+
             #Simulating one step of the chain: 
             z = torch.randn_like(xt[:,0].unsqueeze(1))
             coef_x0 = self.posterior_mean_coef_x0[t].view(-1, 1, 1, 1)
@@ -504,21 +524,24 @@ class ConditionalDDPM(DDPM):
             variance_t = self.posterior_variance[t].view(-1, 1, 1, 1)
 
             # Simulate the same step as p_sample: clamp and zero land exactly as predict_x0 does.
-            x0_step = self.constrain_x0(predicted_x0_residual, k)
+            # Detached: x_{t-1} is a fixed input to the second pass, no gradient through the chain.
+            x0_step = self.constrain_x0(predicted_x0_residual.detach(), k)
             mean = coef_x0 * x0_step + coef_xt * xt
             xtm1 = mean + torch.sqrt(variance_t) * z
             
             input_Xm1 = torch.cat([xtm1, selected_context], dim=1)
             unfolded_x0_residual = model(self.model_input(input_Xm1), t-1, month)
 
-            se = w * 0.5 * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2 + w * 0.5 * (unfolded_x0_residual - x0_residual.unsqueeze(1)) ** 2
-        else: 
-            se = w * (predicted_x0_residual - x0_residual.unsqueeze(1)) ** 2
+            loss2 = 0.5 * (w * (unfolded_x0_residual - target_x0) ** 2)[mask].mean()
+            if backward:
+                loss2.backward()
+            loss = loss1 + loss2
+        else:
+            loss = (w * (predicted_x0_residual - target_x0) ** 2)[mask].mean()
+            if backward:
+                loss.backward()
 
-        #se = (predicted_x0_residual - noise) ** 2
-        loss = se[self.water_mask.expand_as(se)].mean()
-
-        return loss
+        return loss.detach() if backward else loss
 
     @torch.no_grad()
     def p_sample(self, model, x, t, month, base: torch.Tensor):

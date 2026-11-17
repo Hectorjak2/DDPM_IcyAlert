@@ -110,7 +110,7 @@ class TrainConfig:
 
     #DDPM specific
     analysis_sampling: bool = False
-    unfolded_loss: bool = False
+    unfolded_loss: bool = True
     dose_loss: int = None#0.1  #p: chance of replacing x_t with noise
     # Input perturbation (Ning et al. 2023, DDPM-IP): x_t is built from noise + gamma * xi, xi ~ N(0, I),
     # so the network also sees x_t slightly off the forward process, as it does in the sampling chain
@@ -126,7 +126,7 @@ class TrainConfig:
     
     #regular settings
     dataset = DatasetChoice.CARRA_CROPPED
-    experiment_name: str = f"ddpm-corrected-land-256-extended"
+    experiment_name: str = f"ddpm-corrected-land-256-UNFOLD"
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
@@ -135,7 +135,7 @@ class TrainConfig:
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = True 
-    weights: str = "ddpm-corrected-land-256/final_weights.pth"
+    weights: str = None#"ddpm-corrected-land-256/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
