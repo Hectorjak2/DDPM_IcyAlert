@@ -35,7 +35,7 @@ class DDPMConfig:
     DDPM diffusion process configuration.
     """
     timesteps: int = 1000
-    schedule: str = "shifted_cosine"
+    schedule: str = "linear"
 
     # Only used when schedule == "linear".
     beta_start: float = 0.0001
@@ -130,12 +130,12 @@ class TrainConfig:
     batch_size: int = 4
     epochs: int = 10
     lr: float = 3e-4
-    number_of_samples: int = 60
+    number_of_samples: int = 20
     sample_seed: int = 0  # fixes which test dates get forecast, so runs are scored on the same days
     lead_months: int = 1  # autoregressive rollout k+1 ... k+lead_months; >1 drops anchors without ground truth that far ahead, so dates differ from lead 1
     sampling: bool = True
     training: bool = False 
-    weights: str = "ddpm-corrected-land-256/final_weights.pth"
+    weights: str = "ddpm-corrected-land-linear/final_weights.pth"
 
     #Saving settings
     output_dir: str = "results"  # weights and config.txt: {output_dir}/{experiment_name}/
@@ -149,7 +149,7 @@ class EnsembleConfig:
     Ensemble sampling (see ensemble.py). Dates, test slice and dataset come from TrainConfig.
     """
     method: str = "ddpm" #"dropout" (MC dropout through the UNet baseline), "ddpm" (independent initial noise), "deep" (UNets trained from different seeds)
-    weights: str = "results/ddpm-corrected-land-256/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
+    weights: str = "results/ddpm-corrected-land-linear/final_weights.pth" #results/unet-residual/final_weights.pth" #Path to the .pth of the model to ensemble
     members_dir: str = "results/ensembles" #Only used when method == "deep": where train_ensemble wrote member_{seed}/
     n_members: int = 10
-    experiment_name: str = f"{method}-LC-256-ensemble-v2"
+    experiment_name: str = f"{method}-LC-linear-ensemble"

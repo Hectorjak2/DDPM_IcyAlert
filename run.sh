@@ -5,7 +5,7 @@
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 24:00
+#BSUB -W 12:00
 #BSUB -R "rusage[mem=32GB]"
 ###BSUB -R "select[gpu80gb]"
 

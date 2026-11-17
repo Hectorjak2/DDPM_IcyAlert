@@ -1,8 +1,8 @@
 """Thesis figure: radial power spectral density of the target SIC and the forecasts of any
 number of sampled runs in the land-free Denmark Strait window (plotting.spectral).
 
-Edit ``RUNS`` (folder names under ``results/``) and optionally ``LABELS`` below, then run
-from the repo root:
+Edit ``RUNS`` (folder names under ``results/``) below (display names come from ``LABELS``
+in plotting.final_results), then run from the repo root:
 
     python -m plotting.spectral_comparison
 
@@ -11,7 +11,8 @@ the same ``TrainConfig.sample_seed`` share their first dates), against wavelengt
 The target curve comes from the first run. A model curve below the target at a given
 wavelength is missing structure at that scale (smoothing).
 
-Writes ``<OUT_DIR>/spectral_comparison.pdf``.
+Writes ``<OUT_DIR>/spectral_comparison.pdf`` (half page width, the same size and styling as
+``final_results``' calibration_comparison, so the two sit side by side).
 """
 from pathlib import Path
 
@@ -20,54 +21,38 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from plotting.config import savefig, TEXTWIDTH_IN, COLORS
+from plotting.config import savefig, TEXTWIDTH_IN
 from plotting.evaluation import load_leads
+from plotting.final_results import _family_color, _name, _tex_name
 from plotting.spectral import find_landfree_region, mean_spacing_km, radial_psd
 from utils.dataloader import CARRA2_DATA_ROOT, CROPPED_X, CROPPED_Y
 
-# Folder names under results/, in the order they appear in the legend.
+# Folder names under results/, in the order they appear in the legend. Display names come
+# from plotting.final_results.LABELS so the legend matches calibration_comparison.
 RUNS = [
-    "deep-ensemble",
-    "ensembles/member_5",
     "ddpm-corrected-land-256",
     "ddpm-LC-256-ensemble",
+    "ensembles/member_5",
+    "deep-ensemble",
 ]
+LEAD = 1                   # lead time to score; every run needs at least this many leads
+OUT_DIR = "final_figures"  # where the figure is written
 
-# Optional display names; a run not listed here is shown by its folder name.
-LABELS = {
-    "deep-ensemble": "U-Net Ensemble",
-    "ensembles/member_5": "U-Net Member",
-    "ddpm-corrected-land-64": "LC 64", 
-    "ddpm-corrected-land-128": "LC 128",
-    "ddpm-corrected-land-256": "DDPM Member",
-    "ddpm-LC-256-ensemble": "DDPM Ensemble",
-    "ddpm-corrected-land-32": "LC 32",
-}
-LEAD = 1             # lead time to score; every run needs at least this many leads
-OUT_DIR = "figures"  # where the figure is written
-
-# The target is black; runs take these colours in RUNS order (the first two match
-# plotting.model_comparison: UNet teal, DDPM plum). Runs whose display label (LABELS,
-# else the folder name) contains "ensemble", ignoring case, are drawn solid, all other
-# runs dashed.
+# Styling as in final_results.plot_calibration_comparison: one colour per model family
+# (DDPM COLORS[0], UNet COLORS[1]); single members dashed and slightly transparent,
+# ensemble means solid. The target is solid black, drawn on top.
 TARGET_COLOR = "black"
-RUN_COLORS = [COLORS[i] for i in (0, 2, 1, 3, 4, 5)]
-MODEL_ALPHA = 0.8
+MEMBER_ALPHA = 0.6
 
 # The WEST window inside the full-domain store (utils/prepare_west_zarr.py). Only the
 # full-domain store still has latitude/longitude.
 WEST_Y0, WEST_X0 = 300, 884
 
+# Decades of empty space below the lowest curve, room for the legend.
+LEGEND_ROOM_DECADES = 3
+
 # Wavelength ticks [km].
 WAVELENGTH_TICKS = [300, 100, 50, 25, 10, 5]
-
-
-def _tex_name(run: str) -> str:
-    """Display name for a run, safe for usetex."""
-    label = LABELS.get(run, run)
-    for char in "_%&#":
-        label = label.replace(char, "\\" + char)
-    return label
 
 
 def cropped_lat_lon():
@@ -119,8 +104,6 @@ def load_psds(run, lat, lon, window=None):
 def make_figure(runs, out_dir):
     if not runs:
         raise ValueError("RUNS is empty -- list the folders under results/ to compare.")
-    if len(runs) > len(RUN_COLORS):
-        raise ValueError(f"At most {len(RUN_COLORS)} runs fit the colour cycle, got {len(runs)}.")
 
     lat, lon = cropped_lat_lon()
     window = None
@@ -139,36 +122,45 @@ def make_figure(runs, out_dir):
     print(f"Using the {len(common)} test dates all runs share.")
 
     truth_by_date = loaded[0][2]
-    # (label, psd, line style kwargs). The target is solid black, opaque and drawn on top;
-    # models are slightly transparent, ensembles solid and everything else dashed.
+    # (label, psd, line style kwargs), styled as in final_results.plot_calibration_comparison.
+    # The target comes first in the legend and is drawn on top of the models (zorder).
     series = [("Target", np.mean([truth_by_date[d] for d in common], axis=0),
                dict(color=TARGET_COLOR, linestyle="-", zorder=3))]
-    for i, (run, predictions, _) in enumerate(loaded):
+    for run, predictions, _ in loaded:
         psd = np.mean([predictions[d] for d in common], axis=0)
-        linestyle = "-" if "ensemble" in LABELS.get(run, run).lower() else "--"
+        name = _name(run).lower()
+        member = "member" in name
         series.append((_tex_name(run), psd,
-                       dict(color=RUN_COLORS[i], linestyle=linestyle, alpha=MODEL_ALPHA)))
+                       dict(color=_family_color(name), linestyle="--" if member else "-",
+                            alpha=MEMBER_ALPHA if member else 1.0)))
 
     wavelength = 1 / k  # [km]
     fig, ax = plt.subplots()
     # No markers: they suggested the PSD is only computed at the marked points. Colour and
     # line style tell the curves apart; each curve is all radial wavenumber bins joined.
     for label, psd, style in series:
-        ax.loglog(wavelength, psd, linewidth=1.2, label=label, **style)
+        ax.loglog(wavelength, psd, linewidth=1.25, label=label, **style)
 
     ax.set_xlabel("wavelength (km)")
     ax.set_ylabel(r"PSD")
     ax.set_xlim(wavelength[0], wavelength[-1])  # large scales on the left
+    # Room below the curves (in decades, the axis is log) so the legend in the lower left
+    # does not sit on the curves.
+    lo = min(psd.min() for _, psd, _ in series)
+    hi = max(psd.max() for _, psd, _ in series)
+    ax.set_ylim(lo / 10 ** LEGEND_ROOM_DECADES, hi * 2)
     ax.set_xticks(WAVELENGTH_TICKS, labels=[str(t) for t in WAVELENGTH_TICKS])
     ax.minorticks_off()
 
-    # Legend in a box below the axes; tight_layout shrinks the axes to keep the figure square.
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, frameon=True,
-              handlelength=1.5, columnspacing=1.0, borderaxespad=0)
+    # The PSD falls from the large scales (upper left) to the small ones (lower right), so
+    # the legend goes inside the axes in the empty lower-left corner, styled as in
+    # calibration_comparison.
+    ax.legend(loc="lower left", handlelength=1.4, handletextpad=0.3, labelspacing=0.3,
+              borderaxespad=0.1)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    savefig(fig, out_dir, "spectral_comparison", width=TEXTWIDTH_IN / 2, height=TEXTWIDTH_IN / 2)  # square
+    savefig(fig, out_dir, "spectral_comparison", width=TEXTWIDTH_IN / 2, height=2.8)
     plt.close(fig)
     print(f"Wrote {out_dir / 'spectral_comparison.pdf'}")
 

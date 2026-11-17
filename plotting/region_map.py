@@ -42,8 +42,8 @@ ax.set_extent([xy[:, 0].min() - m, xy[:, 0].max() + m, xy[:, 1].min() - m, xy[:,
 
 ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor=GRID, edgecolor="none")
 ax.add_feature(cfeature.COASTLINE.with_scale("50m"), edgecolor=MUTED, linewidth=0.4)
-ax.fill(xy[:, 0], xy[:, 1], facecolor=COLORS[0], alpha=0.12, edgecolor="none", transform=CARRA_CRS)
-ax.plot(xy[:, 0], xy[:, 1], color=COLORS[0], linewidth=1.4, transform=CARRA_CRS)
+ax.fill(xy[:, 0], xy[:, 1], facecolor=COLORS[3], alpha=0.22, edgecolor="none", transform=CARRA_CRS)
+ax.plot(xy[:, 0], xy[:, 1], color=COLORS[3], linewidth=1.4, transform=CARRA_CRS)
 
 gl = ax.gridlines(
     crs=ccrs.PlateCarree(), draw_labels=True, color=MUTED, linewidth=0.4, linestyle=":",

@@ -46,6 +46,9 @@ LAND_COLOR = "lightgray"  # as SIC_CMAP in plotting.evaluation
 SPREAD_CMAP = plt.cm.viridis.copy()
 SPREAD_CMAP.set_bad(LAND_COLOR)
 
+# Spread-skill diagram: number of equal-count spread bins (points per line).
+SPREAD_SKILL_BINS = 20
+
 
 def load_ensemble(path: str | Path, lead: int = 1):
     """Load an ensemble_samples.pkl, given its path or the run's results directory/name.
@@ -164,6 +167,29 @@ def draw_rank_histogram(ax, n_members, stats, ylabel=True, legend=True):
     ax.set_xlim(edges[0], edges[-1])
     if legend:
         ax.legend()
+
+
+def spread_skill_curve(data, n_members, n_bins=SPREAD_SKILL_BINS):
+    """Binned spread-skill pairs over the marginal ice zone (``miz_mask``) of all dates.
+
+    The pixels are sorted by member variance (ddof=1) and split into ``n_bins`` bins with
+    the same number of pixels. Returns ``(rmse, spread)``, each [n_bins]: per bin the RMSE
+    of the ensemble mean and the RMS spread times sqrt((M+1)/M), so a calibrated ensemble
+    has rmse == spread."""
+    variances, sq_errors = [], []
+    for members, target, k in zip(data["members"], data["targets"], data["k"]):
+        mask = miz_mask(target, k)
+        m, y = members[:, mask].astype(np.float64), target[mask].astype(np.float64)
+        variances.append(m.var(axis=0, ddof=1))
+        sq_errors.append((m.mean(axis=0) - y) ** 2)
+    variances, sq_errors = np.concatenate(variances), np.concatenate(sq_errors)
+
+    order = np.argsort(variances, kind="stable")
+    bins = np.array_split(order, n_bins)
+    factor = np.sqrt((n_members + 1) / n_members)
+    rmse = np.array([np.sqrt(sq_errors[b].mean()) for b in bins])
+    spread = np.array([np.sqrt(variances[b].mean()) for b in bins]) * factor
+    return rmse, spread
 
 
 def spread_skill_maps(data):

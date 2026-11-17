@@ -14,6 +14,9 @@ FONTSIZE = 10
 # ax.plot calls get the colours that read as lines; COLORS[i + 3] is the pale partner of
 # COLORS[i] (suited to fills and bands, faint as thin lines on white).
 COLORS = ["#A4A4A4", "#97B600", "#007997", "#0068B3", "#68D7FF","#9601BF"]
+COLORS = ["#4E5CB2","#1E2445","#D9A03F", "#904E29", "#EAD9C6","#D9DDF2", "#6E7280"]
+COLORS = ["#61A68D", "#D97A5D", "#EA9F45","#BABABA", "#939CAF", "#71787F", "#647B93",]
+
 # Per-series markers so curves stay distinguishable in grayscale / for colour-blind readers
 MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 # Soft neutrals

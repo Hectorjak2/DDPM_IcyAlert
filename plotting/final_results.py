@@ -14,9 +14,13 @@ from the repo root:
 3. Writes ``<OUT_DIR>/sampling_loss_comparison.pdf`` (half page width): the RMSE over water
    per reverse step, averaged over samples, one curve per run. Runs can have different T, so
    the x-axis is the normalised timestep t / T.
-4. Writes ``<OUT_DIR>/calibration_comparison.pdf`` (half page width, same height as 3, so the
-   two sit side by side): reliability, the mean target SIC per predicted-SIC bin, one
-   curve per run.
+4. Writes ``<OUT_DIR>/calibration_comparison.pdf`` (half page width, same height as 3):
+   reliability, the mean target SIC per predicted-SIC bin, one curve per run, with its own
+   legend.
+5. For the ensemble ``SEASON_RUN`` only, cool vs melt season (by target month):
+   ``<OUT_DIR>/calibration_seasons.pdf``, the reliability of 4 with one curve per season, and
+   ``<OUT_DIR>/spread_skill_seasons.pdf``, the binned spread-skill diagram of
+   ``plotting.ensemble_comparison`` with one line per season.
 
 Everything (runs, baselines, truth) is scored on the target dates that all runs share, so
 every row covers the same samples. Runs sampled with the same ``TrainConfig.sample_seed``
@@ -30,38 +34,49 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from plotting.config import savefig, TEXTWIDTH_IN
-from plotting.config import MUTED, REF_LINESTYLE
-from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, _clean_image_axis,
-                                 _load_climatology, calibration_stats, load_leads,
-                                 mean_residuals, sample_errors)
+from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
+from plotting.ensemble_evaluation import SPREAD_SKILL_BINS, season_of, spread_skill_curve
+from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, SEASON_TITLES,
+                                 _clean_image_axis, _load_climatology, calibration_stats,
+                                 load_leads, mean_residuals, sample_errors)
 
 # Folder names under results/, in the order they appear in the table and the grid.
 RUNS = [
-    "ddpm-corrected-land-32",
-    "ddpm-corrected-land-64",
-    "ddpm-corrected-land-128",
+    #"ddpm-corrected-land-32",
+    #"ddpm-corrected-land-64",
+    #"ddpm-corrected-land-128",
     "ddpm-corrected-land-256",
-    "ddpm-corrected-land-linear",
-    "ddpm-corrected-land-cosine",
-    #"ddpm-LC-256-ensemble",
-    #"ensembles/member_5",
-    #"deep-ensemble",
+    #"ddpm-corrected-land-linear",
+    #"ddpm-corrected-land-cosine",
+    "ddpm-LC-256-ensemble-v3",
+    "ensembles/member_5",
+    "deep-ensemble2",
 
 ]
 # Optional display names; a run not listed here is shown by its folder name.
 LABELS = {
     "ddpm-corrected-land-64": "Shift (64)",
     "ddpm-corrected-land-128": "Shift (128)",
-    "ddpm-corrected-land-256": "Shift (256)",
+    "ddpm-corrected-land-256": "DDPM, member",
     "ddpm-corrected-land-linear": "Linear",
     "ddpm-corrected-land-32": "Shift (32)",
     "ddpm-corrected-land-cosine": "Cosine",
-    "ensembles/member_5": "UNet",
-    "deep-ensemble": "Unet Ensemble",
-    "ddpm-LC-256-ensemble": "DDPM Ensemble"
+    "ensembles/member_5": "U-Net, member",
+    "deep-ensemble": "U-Net Ensemble, mean",
+    "ddpm-LC-256-ensemble": "DDPM Ensemble, mean"
 
 }
+# Legend labels for calibration_comparison only, where a long label would run into the
+# curves in the upper-left legend; runs not listed use LABELS.
+CALIBRATION_LABELS = {
+    "deep-ensemble": "U-Net Ensemble,\nmean",
+}
+# The ensemble whose cool and melt seasons are compared in calibration_seasons and
+# spread_skill_seasons (must be in RUNS); None skips both figures.
+SEASON_RUN = "ddpm-LC-256-ensemble"
+# Curve order (legend order) and colour per season in those two figures.
+SEASON_ORDER = ("cool", "melt")
+SEASON_COLORS = {"cool": COLORS[6], "melt": COLORS[2]}
 LEAD = 1             # lead time to score; every run needs at least this many leads
 OUT_DIR = "final_figures"  # where the figures are written
 
@@ -105,8 +120,10 @@ def load_run(run: str, dates=None):
     Returns a dict with ``run``; ``errors``, the ``sample_errors`` DataFrame (with the
     baselines); ``residuals``, the ``mean_residuals`` dict; ``losses``, the RMSE over water
     per reverse step averaged over the samples ([steps], None if the pickle has none);
-    ``calibration``, the ``calibration_stats`` tuple; and ``dates``, the target dates of the
-    scored samples.
+    ``calibration``, the ``calibration_stats`` tuple; ``dates``, the target dates of the
+    scored samples; and, for ``SEASON_RUN`` only (else None), ``seasons``: per season
+    {"calibration": calibration_stats, "curve": spread_skill_curve (None for a single
+    forecast)} over that season's samples.
     """
     _, leads = load_leads(run)
     if len(leads) < LEAD:
@@ -125,7 +142,26 @@ def load_run(run: str, dates=None):
         "losses": None if losses is None else np.sqrt(losses).mean(axis=0),
         "calibration": calibration_stats(data),
         "dates": [pd.Timestamp(d[0]) for d in data["times"]],
+        "seasons": season_stats(data) if run == SEASON_RUN else None,
     }
+
+
+def season_stats(data):
+    """Per season with samples, in SEASON_ORDER: the ``calibration_stats`` and the
+    ``spread_skill_curve`` (None for a single forecast) over that season's samples only."""
+    n_members = data["members"][0].shape[0]
+    out = {}
+    for season in SEASON_ORDER:
+        keep = [i for i, d in enumerate(data["times"]) if season_of(d[0]) == season]
+        if not keep:
+            continue
+        sub = _subset(data, keep)
+        out[season] = {
+            "n": len(keep),
+            "calibration": calibration_stats(sub),
+            "curve": spread_skill_curve(sub, n_members) if n_members > 1 else None,
+        }
+    return out
 
 
 def load_all(runs):
@@ -289,27 +325,112 @@ def plot_sampling_loss_comparison(results, out_dir):
     return True
 
 
+def _family_color(name: str):
+    """Colour for a run's model family, from its lower-cased display label: DDPM runs share
+    COLORS[0], UNet runs COLORS[1]; anything else falls back to the default cycle (None)."""
+    if "ddpm" in name:
+        return COLORS[0]
+    if "unet" in name or "u-net" in name:
+        return COLORS[1]
+    return None
+
+
 def plot_calibration_comparison(results, out_dir):
     """Reliability: mean target SIC per predicted-SIC bin (pooled over all water pixels of
     the shared samples), one curve per run, against the diagonal. Only the means: the interquartile bands
     of ``evaluation.plot_calibration`` would overlap into a blur with several runs.
 
-    No legend: the curves leave no free corner, and the figure is meant to sit next to
-    sampling_loss_comparison, whose legend uses the same colours (both follow the default
-    colour cycle of plotting/config.py in RUNS order). The dashed diagonal
-    (perfect calibration) is left to the caption."""
+    One colour per model family (from the display label: DDPM or UNet); single members
+    (label contains "member") are dashed and slightly transparent, ensemble means solid. The
+    curves hug the diagonal, so the legend goes in the empty upper-left corner. The black
+    dashed diagonal (perfect calibration) is left to the caption."""
     fig, ax = plt.subplots()
-    ax.plot([0, 1], [0, 1], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE)
+    ax.plot([0, 1], [0, 1], color="black", linewidth=0.8, linestyle="--")
     for r in results:
         centers, filled, (mean, _, _) = r["calibration"]
-        ax.plot(centers[filled], mean, label=_tex_name(r["run"]), linewidth=1.25)
+        name = _name(r["run"]).lower()
+        member = "member" in name
+        label = CALIBRATION_LABELS.get(r["run"], _tex_name(r["run"]))
+        ax.plot(centers[filled], mean, label=label, linewidth=1.25,
+                color=_family_color(name), linestyle="--" if member else "-",
+                alpha=0.6 if member else 1.0)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_xlabel("predicted SIC")
     ax.set_ylabel("mean target SIC")
+    ax.legend(loc="upper left", handlelength=1.4, handletextpad=0.3, labelspacing=0.3,
+              borderaxespad=0.1)
 
     savefig(fig, out_dir, "calibration_comparison", width=TEXTWIDTH_IN / 2, height=2.8)
     plt.close(fig)
+
+
+def plot_calibration_seasons(seasons, out_dir):
+    """Reliability of SEASON_RUN, one curve per season, styled as calibration_comparison:
+    the black dashed diagonal (perfect calibration) is left to the caption."""
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1], color="black", linewidth=0.8, linestyle="--")
+    for season, s in seasons.items():
+        centers, filled, (mean, _, _) = s["calibration"]
+        ax.plot(centers[filled], mean, label=SEASON_TITLES[season], linewidth=1.25,
+                color=SEASON_COLORS[season])
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("predicted SIC")
+    ax.set_ylabel("mean target SIC")
+    ax.legend(loc="upper left", handlelength=1.4, handletextpad=0.3, labelspacing=0.3,
+              borderaxespad=0.1)
+
+    savefig(fig, out_dir, "calibration_seasons", width=TEXTWIDTH_IN / 2, height=2.8)
+    plt.close(fig)
+
+
+def plot_spread_skill_seasons(seasons, out_dir):
+    """Binned spread-skill diagram of SEASON_RUN, one line per season, styled as
+    ensemble_comparison.plot_spread_skill (dashed 1:1 line = perfect calibration)."""
+    fig, ax = plt.subplots()
+    top = 0.0
+    print(f"Spread-skill bins of {_name(SEASON_RUN)} ({SPREAD_SKILL_BINS}, marginal ice zone): "
+          f"RMSE / spread per bin")
+    for (season, s), marker in zip(seasons.items(), MARKERS):
+        rmse, spread = s["curve"]
+        ax.plot(rmse, spread, color=SEASON_COLORS[season], marker=marker, markersize=4,
+                label=SEASON_TITLES[season])
+        top = max(top, rmse.max(), spread.max())
+        print(f"  {season:<5} (n={s['n']:>3}) " + " ".join(f"{r:.2f}" for r in rmse / spread))
+    print()
+
+    top *= 1.05
+    ax.plot([0, top], [0, top], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE,
+            label="perfect calibration")
+    ax.set_xlim(0, top)
+    ax.set_ylim(0, top)
+    ax.set_aspect("equal")
+    ax.set_xlabel("RMSE of ensemble mean")
+    ax.set_ylabel(r"Spread $\times \sqrt{(M+1)/M}$")
+    ax.legend(loc="upper left")
+    savefig(fig, out_dir, "spread_skill_seasons", width=TEXTWIDTH_IN / 2, height=3.0)
+    plt.close(fig)
+
+
+def plot_season_figures(results, out_dir):
+    """calibration_seasons and spread_skill_seasons for SEASON_RUN, if it is in RUNS."""
+    if SEASON_RUN is None:
+        return
+    seasons = next((r["seasons"] for r in results if r["run"] == SEASON_RUN), None)
+    if not seasons:
+        print(f"SEASON_RUN {SEASON_RUN} is not in RUNS (or has no cool/melt samples) -- "
+              f"skipping calibration_seasons and spread_skill_seasons.")
+        return
+    print(f"{_name(SEASON_RUN)} per season: "
+          + ", ".join(f"{season} {s['n']} dates" for season, s in seasons.items()))
+    plot_calibration_seasons(seasons, out_dir)
+    print(f"Wrote {out_dir}/calibration_seasons.pdf")
+    if any(s["curve"] is None for s in seasons.values()):
+        print(f"{SEASON_RUN} is a single forecast -- skipping spread_skill_seasons.")
+        return
+    plot_spread_skill_seasons(seasons, out_dir)
+    print(f"Wrote {out_dir}/spread_skill_seasons.pdf")
 
 
 def main():
@@ -326,6 +447,7 @@ def main():
         print(f"Wrote {out_dir}/sampling_loss_comparison.pdf")
     plot_calibration_comparison(results, out_dir)
     print(f"Wrote {out_dir}/calibration_comparison.pdf")
+    plot_season_figures(results, out_dir)
 
 
 if __name__ == "__main__":
