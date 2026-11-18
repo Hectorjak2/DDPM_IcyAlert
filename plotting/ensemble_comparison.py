@@ -50,8 +50,8 @@ from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, _clean_image_axis
 from plotting.final_results import _cell, _climatology, _subset
 
 # Folder names under results/. U-Net is the top row / left panel, DDPM the bottom row / right.
-UNET_RUN = "deep-ensemble"
-DDPM_RUN = "ddpm-LC-256-ensemble"
+UNET_RUN = "deep-ensemble2"
+DDPM_RUN = "ddpm-LC-256-ensemble-v3"
 RUNS = [UNET_RUN, DDPM_RUN]
 # Display names (figure titles and row labels, tables).
 LABELS = {
