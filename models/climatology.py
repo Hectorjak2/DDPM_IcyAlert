@@ -8,6 +8,7 @@ only loads that file:
     python -m models.climatology --area CARRA_WEST
 """
 import argparse
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +64,38 @@ class Climatology:
     def predict(self, month: int) -> np.ndarray:
         """Forecast for a target date in calendar ``month`` (1-12, Jan=1)."""
         return self.means[month - 1]
+
+
+@cache
+def _siconc_for_shape(shape: tuple[int, int]):
+    """The daily siconc DataArray (data range [0, 1], land NaN), cropped to the area whose grid
+    is ``shape`` (CARRA_CROPPED, CARRA_WEST or CARRA_TEST)."""
+    import xarray as xr
+    da = xr.open_zarr(f"{CARRA2_DATA_ROOT}/west.zarr")["siconc"]
+    crops = {DatasetChoice.CARRA_CROPPED: (CROPPED_Y, CROPPED_X),
+             DatasetChoice.CARRA_WEST: (slice(None), slice(None)),
+             DatasetChoice.CARRA_TEST: (slice(750, 1006), slice(100, 356))}  # as CARRA2
+    for y, x in crops.values():
+        cropped = da.isel(y=y, x=x)
+        if (cropped.sizes["y"], cropped.sizes["x"]) == tuple(shape):
+            return cropped
+    raise ValueError(f"No CARRA2 area has grid {shape}.")
+
+
+def ensemble_members(date, shape: tuple[int, int], n_years: int = 10) -> np.ndarray:
+    """Climatological ensemble for target ``date``: the observed SIC on the same calendar day
+    in each of the ``n_years`` years before the target year (sliding window; all of it is
+    observed by forecast time). 29 Feb falls back to 28 Feb in non-leap years.
+
+    Returns [n_years, H, W] in data range [0, 1], land NaN, oldest year first.
+    """
+    import pandas as pd
+    date = pd.Timestamp(date)
+    days = []
+    for year in range(date.year - n_years, date.year):
+        day = 28 if (date.month, date.day) == (2, 29) else date.day
+        days.append(np.datetime64(pd.Timestamp(year, date.month, day).normalize(), "ns"))
+    return _siconc_for_shape(tuple(shape)).sel(time=days).values.astype(np.float32)
 
 
 if __name__ == "__main__":

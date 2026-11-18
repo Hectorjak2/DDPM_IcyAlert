@@ -1,8 +1,8 @@
 #!/bin/sh
 
 ### General options ,gpua40, gpuv100, gpul40s, gpua100
-#BSUB -J 256-UNFLD
-#BSUB -q gpul40s
+#BSUB -J 256-UNFLD-l6
+#BSUB -q gpua100
 #BSUB -n 1
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00

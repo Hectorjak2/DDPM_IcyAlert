@@ -72,6 +72,10 @@ MAX_CALIBRATION_COLS = 3  # lead-time panels per row in the calibration grid
 SEASONS = {"melt": (4, 5, 6, 7, 8, 9), "cool": (10, 11, 12, 1, 2, 3)}
 
 ICE_EDGE = 0.15  # SIC contour that defines the ice edge
+# CARRA2 grid spacing. The Lambert conformal grid is close to equal-area over the domain, so
+# the IIEE / SPS treat every cell as GRID_KM^2 (the data carries no cell areas).
+GRID_KM = 2.5
+CELL_AREA_KM2 = GRID_KM ** 2
 # Squared-error threshold for the red overlay (|error| > ~0.32). Absolute rather than a
 # per-sample percentile, so the amount of red is comparable between the two seasons.
 ERROR_THRESHOLD = 0.1
@@ -472,6 +476,24 @@ def _water_crps(members, target) -> float:
     return float((skill - spread).mean())
 
 
+def _iiee(pred, target) -> float:
+    """Integrated Ice Edge Error (Goessling et al. 2016) in km^2: the area of water where the
+    forecast and the target disagree on ice (SIC > ICE_EDGE) = overestimation + underestimation."""
+    water = np.isfinite(pred) & np.isfinite(target)
+    wrong = (pred[water] > ICE_EDGE) != (target[water] > ICE_EDGE)
+    return float(wrong.sum() * CELL_AREA_KM2)
+
+
+def _sps(members, target) -> float:
+    """Spatial Probability Score (Goessling & Jung 2018) in km^2: the area integral of
+    (P_f - O)^2, with P_f the share of members with SIC > ICE_EDGE and O the observed ice
+    (0/1). members [M, H, W]; for a single member it is the IIEE."""
+    water = np.isfinite(target) & np.isfinite(members).all(axis=0)
+    prob = (members[:, water] > ICE_EDGE).mean(axis=0)
+    obs = target[water] > ICE_EDGE
+    return float(((prob - obs) ** 2).sum() * CELL_AREA_KM2)
+
+
 def sample_errors(data, climatology) -> pd.DataFrame:
     """One row per sample: its season (of the target month), the MSE over water of the
     forecast (the ensemble mean), of persistence (forecast = k) and of climatology (mean of
@@ -480,7 +502,11 @@ def sample_errors(data, climatology) -> pd.DataFrame:
 
     Per ensemble: ``member_mse`` is the MSE of a single member, averaged over the members
     (the same as ``mse`` for one member), and ``crps`` the ensemble CRPS, next to the MAE of
-    the two baselines (``persistence_mae``, ``climatology_mae``), which is their CRPS."""
+    the two baselines (``persistence_mae``, ``climatology_mae``), which is their CRPS.
+
+    Ice edge, in km^2: ``iiee`` of the forecast (the ensemble mean), ``member_iiee`` of a
+    single member averaged over the members, ``sps`` of the ensemble (= ``member_iiee`` for
+    one member), and ``persistence_iiee`` / ``climatology_iiee``, which are also their SPS."""
     rows = []
     for pred, members, target, k, dates in zip(data["predictions"], data["members"],
                                                data["targets"], data["k"], data["times"]):
@@ -498,6 +524,11 @@ def sample_errors(data, climatology) -> pd.DataFrame:
             "climatology": _water_mse(clim, target) if clim is not None else np.nan,
             "climatology_mae": _water_mae(clim, target) if clim is not None else np.nan,
             "large": float((sq_err[water] > ERROR_THRESHOLD).mean()),
+            "iiee": _iiee(pred, target),
+            "member_iiee": float(np.mean([_iiee(m, target) for m in members])),
+            "sps": _sps(members, target),
+            "persistence_iiee": _iiee(k, target),
+            "climatology_iiee": _iiee(clim, target) if clim is not None else np.nan,
         })
     return pd.DataFrame(rows)
 

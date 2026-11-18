@@ -285,7 +285,7 @@ def plot_case_maps(scores, out_dir):
     """The CASE_DATE forecast. One row per run in CASE_RUNS: true residual, ensemble-mean
     residual, spread, absolute error of the ensemble mean. Residuals on soft RdBu (white at 0),
     spread and error on magma; scales shared by the rows. The spread and RMSE over water are
-    written under the spread and error maps."""
+    the titles of each row's spread and error maps."""
     runs = [run for run in CASE_RUNS if scores[run]["case"] is not None]
     if not runs:
         print(f"No forecast with target {CASE_DATE} -- skipping ensemble_case.")
@@ -299,7 +299,7 @@ def plot_case_maps(scores, out_dir):
         [c[key][water] for c in cases.values() for key in ("spread", "error")]),
         CASE_VMAX_PERCENTILE)
 
-    titles = ("True\nresidual", "Ensemble mean\nresidual", "Spread", "Absolute\nerror")
+    titles = ("True\nresidual", "Ensemble mean\nresidual")  # spread/error: titled by value
     keys = ("true", "mean", "spread", "error")
     fig = plt.figure()
     gs = fig.add_gridspec(len(runs) + 1, len(keys), height_ratios=[1] * len(runs) + [0.05])
@@ -322,14 +322,14 @@ def plot_case_maps(scores, out_dir):
                 err_img = ax.imshow(c[key], cmap=CASE_ERROR_CMAP, vmin=0, vmax=err_vmax,
                                     origin="lower", interpolation="none")
             _clean_image_axis(ax)
-            if row == 0:
+            if key == "spread":
+                ax.set_title(rf"Spread $= {spread:.3f}$")
+            elif key == "error":
+                ax.set_title(rf"RMSE $= {rmse:.3f}$")
+            elif row == 0:
                 ax.set_title(titles[col])
             if col == 0:
                 ax.set_ylabel(CASE_ROW_LABELS.get(run, _name(run)))
-            if key == "spread":
-                ax.set_xlabel(rf"spread $= {spread:.3f}$")
-            elif key == "error":
-                ax.set_xlabel(rf"RMSE $= {rmse:.3f}$")
     print()
 
     for img, cols, label in ((res_img, slice(0, 2), "SIC change"),
@@ -340,7 +340,7 @@ def plot_case_maps(scores, out_dir):
         cbar.set_label(label)
 
     # Square maps: the width per map column (less the gaps) sets the height per row, plus the
-    # number under it; then the two-line titles and the colorbars.
+    # spread/RMSE title above it; then the two-line titles and the colorbars.
     panel = 0.82 * TEXTWIDTH_IN / len(keys)
     name = f"ensemble_case_{CASE_DATE}"
     savefig(fig, out_dir, name, width=TEXTWIDTH_IN, height=(panel + 0.25) * len(runs) + 1.0)

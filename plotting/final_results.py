@@ -42,9 +42,10 @@ import pandas as pd
 
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
 from plotting.ensemble_evaluation import SPREAD_SKILL_BINS, season_of, spread_skill_curve
-from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, SEASON_TITLES,
-                                 _clean_image_axis, _load_climatology, calibration_stats,
-                                 load_leads, mean_residuals, sample_errors)
+from models.climatology import ensemble_members
+from plotting.evaluation import (ICE_EDGE, RESIDUAL_CMAP, RESIDUAL_VMAX, SEASON_TITLES,
+                                 _clean_image_axis, _iiee, _load_climatology, _sps,
+                                 calibration_stats, load_leads, mean_residuals, sample_errors)
 
 # Folder names under results/, in the order they appear in the table and the grid.
 RUNS = [
@@ -84,9 +85,19 @@ SEASON_RUN = "ddpm-LC-256-ensemble-v3"
 SEASON_ORDER = ("cool", "melt")
 SEASON_COLORS = {"cool": COLORS[6], "melt": COLORS[2]}
 LEAD = 1             # lead time to score; every run needs at least this many leads
+# Climatological ensemble for the IIEE / SPS table: one member per year, the observed SIC on
+# the target's calendar day in each of the CLIM_ENSEMBLE_YEARS years before the target year
+# (models.climatology.ensemble_members). 10 matches the size of the model ensembles, which
+# matters since a finite ensemble's SPS depends on M. None leaves it out.
+CLIM_ENSEMBLE_YEARS = 10
 # Paired t-tests on the per-date RMSE (A - B), printed after the RMSE table. Each entry is a
 # run in RUNS or a baseline, "climatology" or "persistence".
 PAIRED_TESTS = [
+    ("ddpm-LC-256-ensemble-v3", "deep-ensemble2"),
+    ("ddpm-LC-256-ensemble-v3", "climatology"),
+    ("deep-ensemble2", "climatology"),
+    ("ddpm-LC-256-ensemble-v3", "climatology_ensemble"),
+    ("deep-ensemble2", "climatology_ensemble"),
     ("ensembles/member_5", "ddpm-corrected-land-256"),
     ("ddpm-corrected-land-256", "climatology"),
     ("ensembles/member_5", "climatology"),
@@ -154,16 +165,45 @@ def load_run(run: str, dates=None):
         data = _subset(data, [i for i, d in enumerate(data["times"])
                               if pd.Timestamp(d[0]) in dates])
     losses = data["sampling_losses"]
+    errors = sample_errors(data, _climatology(data["targets"][0].shape))
+    if CLIM_ENSEMBLE_YEARS:
+        errors = errors.join(climatology_ensemble_errors(data))
     return {
         "run": run,
-        "errors": sample_errors(data, _climatology(data["targets"][0].shape)),
+        "errors": errors,
         "residuals": mean_residuals(data),
         # Per-sample RMSE, then the mean over samples, as in print_rmse_table.
         "losses": None if losses is None else np.sqrt(losses).mean(axis=0),
         "calibration": calibration_stats(data),
         "dates": [pd.Timestamp(d[0]) for d in data["times"]],
+        "n_members": data["members"][0].shape[0],
         "seasons": season_stats(data) if run == SEASON_RUN else None,
     }
+
+
+_clim_ensemble_scores = {}  # target date -> scores; they depend on the date only
+
+
+def climatology_ensemble_errors(data) -> pd.DataFrame:
+    """One row per sample of ``data``, in its order, with the ice-edge scores of the
+    climatological ensemble (see CLIM_ENSEMBLE_YEARS), in km^2:
+    ``climatology_ensemble_iiee`` of its mean, ``climatology_ensemble_member_iiee`` of a single
+    member averaged over the members, and ``climatology_ensemble_sps``. Cached per target
+    date, so every run reuses the first run's fields."""
+    rows = []
+    for target, dates in zip(data["targets"], data["times"]):
+        date = pd.Timestamp(dates[0])
+        if date not in _clim_ensemble_scores:
+            members = ensemble_members(date, target.shape, CLIM_ENSEMBLE_YEARS)
+            _clim_ensemble_scores[date] = {
+                # Land is NaN in every member, so the plain mean keeps it NaN.
+                "climatology_ensemble_iiee": _iiee(members.mean(axis=0), target),
+                "climatology_ensemble_member_iiee":
+                    float(np.mean([_iiee(m, target) for m in members])),
+                "climatology_ensemble_sps": _sps(members, target),
+            }
+        rows.append(_clim_ensemble_scores[date])
+    return pd.DataFrame(rows)
 
 
 def season_stats(data):
@@ -254,54 +294,152 @@ def print_rmse_table(results):
     print()
 
 
-BASELINES = ("climatology", "persistence")
+IIEE_UNIT = 1e3  # the IIEE / SPS tables print in 10^3 km^2
 
 
-def _per_date_rmse(results, name: str) -> pd.Series:
-    """Per-sample RMSE over water of a run in ``results`` or a baseline (taken from the first
-    run), indexed by target date. A date drawn twice is averaged, so every date counts once and
-    two series pair up by date."""
+def _iiee_cell(values: pd.Series) -> str:
+    """Mean ± standard error, then the sample std (ddof=1) over the dates, in 10^3 km^2.
+    The std is the date-to-date spread; the SE (std / sqrt(n)) is the uncertainty of the
+    mean -- the one to compare between rows, with the same caveats as ``_cell``."""
+    values = values / IIEE_UNIT
+    n = len(values)
+    std = values.std(ddof=1) if n > 1 else np.nan
+    return f"{values.mean():.1f} ± {std / np.sqrt(n):.1f} (sd {std:.1f})"
+
+
+def print_iiee_table(results):
+    """Per-sample Integrated Ice Edge Error (SIC > ICE_EDGE), mean ± standard error (sd), in
+    10^3 km^2, for all samples and per season. Baselines first (with the climatological
+    ensemble, scored like the model ensembles), then the IIEE of each run's
+    forecast (the ensemble mean); for an ensemble also the mean IIEE of a single member and
+    the SPS, its probabilistic version (= IIEE for a single forecast and the baselines)."""
+    reference = results[0]["errors"]
+    has_climatology = reference.climatology_iiee.notna().any()
+    rows = []  # (label, per-sample errors DataFrame, column)
+    if has_climatology:
+        rows.append(("Climatology", reference, "climatology_iiee"))
+    rows.append(("Persistence", reference, "persistence_iiee"))
+    if "climatology_ensemble_sps" in reference:
+        label = f"Clim. ensemble ({CLIM_ENSEMBLE_YEARS} y)"
+        rows += [(label, reference, "climatology_ensemble_iiee"),
+                 (f"  {label}, member", reference, "climatology_ensemble_member_iiee"),
+                 (f"  {label}, SPS", reference, "climatology_ensemble_sps")]
+    for r in results:
+        rows.append((_name(r["run"]), r["errors"], "iiee"))
+        if r["n_members"] > 1:
+            rows.append((f"  {_name(r['run'])}, member", r["errors"], "member_iiee"))
+            rows.append((f"  {_name(r['run'])}, SPS", r["errors"], "sps"))
+
+    width = 29
+    name_width = max(len(label) for label, _, _ in rows) + 2
+    headers = []
+    for group in GROUPS:
+        n = len(reference) if group == "all" else int((reference.season == group).sum())
+        headers.append(f"{group} (n={n})")
+    header = f"{'':<{name_width}}" + "".join(f"{h:>{width}}" for h in headers)
+
+    print(f"IIEE (SIC > {ICE_EDGE}, lead {LEAD}) in 10^3 km^2, per sample: "
+          f"mean ± standard error (sd)")
+    print(header)
+    print("-" * len(header))
+    for label, errors, column in rows:
+        cells = []
+        for group in GROUPS:
+            subset = errors if group == "all" else errors[errors.season == group]
+            cells.append(_iiee_cell(subset[column]) if len(subset) else "-")
+        print(f"{label:<{name_width}}" + "".join(f"{c:>{width}}" for c in cells))
+    if not has_climatology:
+        print("(no climatology for this grid -- row left out)")
+    print()
+
+
+BASELINES = ("climatology", "persistence", "climatology_ensemble")
+BASELINE_LABELS = {"climatology_ensemble": "Clim. ensemble"}  # else the capitalised name
+# Per paired-test metric: (title, function of (errors DataFrame, run or baseline name) -> the
+# per-sample score, format of the mean difference, format of its SE).
+METRICS = {
+    "rmse": ("RMSE over water",
+             lambda e, n: np.sqrt(e[n if n in BASELINES else "mse"]), "{:+.4f}", "{:.4f}"),
+    "iiee": ("IIEE (10^3 km^2)",
+             lambda e, n: e[f"{n}_iiee" if n in BASELINES else "iiee"] / IIEE_UNIT,
+             "{:+.1f}", "{:.1f}"),
+    # A deterministic forecast's SPS is its IIEE, so the deterministic baselines use their
+    # IIEE; the climatological ensemble has its own SPS.
+    "sps": ("SPS (10^3 km^2)",
+            lambda e, n: e["sps" if n not in BASELINES else
+                           f"{n}_sps" if f"{n}_sps" in e else f"{n}_iiee"] / IIEE_UNIT,
+            "{:+.1f}", "{:.1f}"),
+}
+
+
+def _per_date(results, name: str, metric: str) -> pd.Series:
+    """Per-sample ``metric`` of a run in ``results`` or a baseline (taken from the first run),
+    indexed by target date. A date drawn twice is averaged, so every date counts once and two
+    series pair up by date."""
     run = results[0] if name in BASELINES else next(r for r in results if r["run"] == name)
-    column = name if name in BASELINES else "mse"
-    rmse = pd.Series(np.sqrt(run["errors"][column].to_numpy()), index=run["dates"])
+    score = METRICS[metric][1](run["errors"], name)
+    values = pd.Series(score.to_numpy(), index=run["dates"])
     season = pd.Series(run["errors"]["season"].to_numpy(), index=run["dates"])
-    return rmse.groupby(level=0).mean(), season.groupby(level=0).first()
+    return values.groupby(level=0).mean(), season.groupby(level=0).first()
 
 
-def print_paired_tests(results):
+def print_paired_tests(results, metric: str = "rmse"):
     """Paired t-test per pair in PAIRED_TESTS, for all dates and per season: the per-date
-    difference d = RMSE_A - RMSE_B, its mean ± standard error s_d / sqrt(n), t = mean / SE
-    (df = n - 1) and the two-sided p-value. d < 0 means A has the lower RMSE.
+    difference d = A - B of ``metric`` (a key of METRICS), its mean ± standard error
+    s_d / sqrt(n), t = mean / SE (df = n - 1) and the two-sided p-value. d < 0 means A has
+    the lower error. Pairs with a run that is not in RUNS are skipped.
 
     The dates are treated as independent; nearby daily dates are correlated, so the real n is
     smaller and the p-values are somewhat optimistic."""
     from scipy import stats
 
-    def name(x):
-        return x.capitalize() if x in BASELINES else _name(x)
+    title, score, diff_fmt, se_fmt = METRICS[metric]
+    loaded = {r["run"] for r in results}
 
-    print(f"Paired t-test on per-date RMSE over water (lead {LEAD}), d = A - B "
-          f"(d < 0: A better)")
+    def available(x):
+        """x is a run in RUNS, or a baseline this metric has a score for."""
+        if x not in BASELINES:
+            return x in loaded
+        try:
+            score(results[0]["errors"], x)
+            return True
+        except KeyError:
+            return False
+
+    pairs = [(a, b) for a, b in PAIRED_TESTS if available(a) and available(b)]
+    skipped = [(a, b) for a, b in PAIRED_TESTS if (a, b) not in pairs]
+    if not pairs:
+        print(f"No pair in PAIRED_TESTS is available -- skipping the {metric} test.\n")
+        return
+
+    def name(x):
+        return BASELINE_LABELS.get(x, x.capitalize()) if x in BASELINES else _name(x)
+
+    print(f"Paired t-test on per-date {title} (lead {LEAD}), d = A - B (d < 0: A better)")
     width = 44
-    pad = max(len(name(a) + " vs " + name(b)) for a, b in PAIRED_TESTS) + 2
+    pad = max(len(name(a) + " vs " + name(b)) for a, b in pairs) + 2
     print(f"{'A vs B':<{pad}}" + "".join(f"{g:>{width}}" for g in GROUPS))
     print("-" * (pad + width * len(GROUPS)))
-    for a, b in PAIRED_TESTS:
-        (rmse_a, season), (rmse_b, _) = _per_date_rmse(results, a), _per_date_rmse(results, b)
-        rmse_a, rmse_b = rmse_a.align(rmse_b, join="inner")
-        season = season.reindex(rmse_a.index)
+    for a, b in pairs:
+        (score_a, season), (score_b, _) = (_per_date(results, a, metric),
+                                           _per_date(results, b, metric))
+        score_a, score_b = score_a.align(score_b, join="inner")
+        season = season.reindex(score_a.index)
         cells = []
         for group in GROUPS:
             keep = season.index if group == "all" else season.index[season == group]
-            d = (rmse_a - rmse_b)[keep]
+            d = (score_a - score_b)[keep]
             n = len(d)
             if n < 2:
                 cells.append("-")
                 continue
             se = d.std(ddof=1) / np.sqrt(n)
-            t, p = stats.ttest_rel(rmse_a[keep], rmse_b[keep])
-            cells.append(f"{d.mean():+.4f} ± {se:.4f}  t={t:+5.1f}  p={p:.0e}  n={n}")
+            t, p = stats.ttest_rel(score_a[keep], score_b[keep])
+            cells.append(f"{diff_fmt.format(d.mean())} ± {se_fmt.format(se)}  "
+                         f"t={t:+5.1f}  p={p:.0e}  n={n}")
         print(f"{name(a) + ' vs ' + name(b):<{pad}}" + "".join(f"{c:>{width}}" for c in cells))
+    for a, b in skipped:
+        print(f"(skipped {a} vs {b}: not in RUNS, or no {metric} for it)")
     print("n = distinct target dates (a date drawn twice counts once)\n")
 
 
@@ -606,6 +744,9 @@ def main(lead_only: bool = False):
     results = load_all(RUNS)
     print_rmse_table(results)
     #print_paired_tests(results)
+    print_iiee_table(results)
+    print_paired_tests(results, "iiee")
+    print_paired_tests(results, "sps")
 
     plot_mean_residual_grid(results, out_dir)
     print(f"Wrote {out_dir}/mean_residual_comparison.pdf")
