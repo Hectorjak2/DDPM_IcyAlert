@@ -18,10 +18,11 @@ from the repo root:
 4. Writes ``<OUT_DIR>/calibration_comparison.pdf`` (half page width, same height as 3):
    reliability, the mean target SIC per predicted-SIC bin, one curve per run, with its own
    legend.
-5. For the ensemble ``SEASON_RUN`` only, cool vs melt season (by target month):
-   ``<OUT_DIR>/calibration_seasons.pdf``, the reliability of 4 with one curve per season, and
-   ``<OUT_DIR>/spread_skill_seasons.pdf``, the binned spread-skill diagram of
-   ``plotting.ensemble_comparison`` with one line per season.
+5. For the ensembles in ``SEASON_RUNS`` only, cool vs melt season (by target month):
+   ``<OUT_DIR>/calibration_seasons.pdf``, the reliability of 4 with one curve per ensemble
+   and season, and ``<OUT_DIR>/spread_skill_seasons.pdf``, the binned spread-skill diagram
+   of ``plotting.ensemble_comparison`` with one line per ensemble and season. Seasons keep
+   their colour across ensembles; each ensemble has its own alpha and line style.
 6. Writes ``<OUT_DIR>/lead_time_comparison.pdf`` (square, half width, log y-axis): the RMSE over water against
    lead time for the six-month rollouts in ``LEAD_RUNS``, next to persistence and
    climatology, and prints the numbers. ``python -m plotting.final_results --lead-only``
@@ -43,7 +44,7 @@ import pandas as pd
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE
 from plotting.ensemble_evaluation import SPREAD_SKILL_BINS, season_of, spread_skill_curve
 from models.climatology import ensemble_members
-from plotting.evaluation import (ICE_EDGE, RESIDUAL_CMAP, RESIDUAL_VMAX, SEASON_TITLES,
+from plotting.evaluation import (ICE_EDGE, RESIDUAL_CMAP, RESIDUAL_VMAX,
                                  _clean_image_axis, _iiee, _load_climatology, _sps,
                                  calibration_stats, load_leads, mean_residuals, sample_errors)
 
@@ -52,12 +53,14 @@ RUNS = [
     #"ddpm-corrected-land-32",
     #"ddpm-corrected-land-64",
     #"ddpm-corrected-land-128",
-    #"ddpm-corrected-land-256",
+    "ddpm-corrected-land-256",
     #"ddpm-corrected-land-linear",
     #"ddpm-corrected-land-cosine",
+    "ddpm-LC-256-DOSE",
+    "ddpm-corrected-land-256-UNFOLD-v2",
     "ddpm-LC-256-ensemble-v3",
     #"ensembles/member_5",
-    "deep-ensemble2",
+    #"deep-ensemble2",
 
 ]
 # Optional display names; a run not listed here is shown by its folder name.
@@ -70,17 +73,23 @@ LABELS = {
     "ddpm-corrected-land-cosine": "Cosine",
     "ensembles/member_5": "U-Net, member",
     "deep-ensemble2": "U-Net Ensemble, mean",
-    "ddpm-LC-256-ensemble": "DDPM Ensemble, mean"
-
+    "ddpm-LC-256-ensemble-v3": "DDPM Ensemble, mean",
+    "ddpm-corrected-land-256-UNFOLD-v2": "DDPM, UNFOLD",
+    "ddpm-LC-256-DOSE": "DDPM, DOSE",
 }
 # Legend labels for calibration_comparison only, where a long label would run into the
 # curves in the upper-left legend; runs not listed use LABELS.
 CALIBRATION_LABELS = {
     "deep-ensemble2": "U-Net Ensemble,\nmean",
 }
-# The ensemble whose cool and melt seasons are compared in calibration_seasons and
-# spread_skill_seasons (must be in RUNS); None skips both figures.
-SEASON_RUN = "ddpm-LC-256-ensemble-v3"
+# The ensembles whose cool and melt seasons are compared in calibration_seasons and
+# spread_skill_seasons, {run in RUNS: (legend prefix, alpha, linestyle)}, in legend order.
+# Every ensemble uses the same SEASON_COLORS; alpha and line style tell them apart (DDPM solid,
+# U-Net faded and dashed, as the members in calibration_comparison). Empty skips both figures.
+SEASON_RUNS = {
+    "ddpm-LC-256-ensemble-v3": ("DDPM", 1.0, "-"),
+    "deep-ensemble2": ("U-Net", 0.6, "--"),
+}
 # Curve order (legend order) and colour per season in those two figures.
 SEASON_ORDER = ("cool", "melt")
 SEASON_COLORS = {"cool": COLORS[6], "melt": COLORS[2]}
@@ -152,7 +161,7 @@ def load_run(run: str, dates=None):
     baselines); ``residuals``, the ``mean_residuals`` dict; ``losses``, the RMSE over water
     per reverse step averaged over the samples ([steps], None if the pickle has none);
     ``calibration``, the ``calibration_stats`` tuple; ``dates``, the target dates of the
-    scored samples; and, for ``SEASON_RUN`` only (else None), ``seasons``: per season
+    scored samples; and, for runs in ``SEASON_RUNS`` only (else None), ``seasons``: per season
     {"calibration": calibration_stats, "curve": spread_skill_curve (None for a single
     forecast)} over that season's samples.
     """
@@ -177,7 +186,7 @@ def load_run(run: str, dates=None):
         "calibration": calibration_stats(data),
         "dates": [pd.Timestamp(d[0]) for d in data["times"]],
         "n_members": data["members"][0].shape[0],
-        "seasons": season_stats(data) if run == SEASON_RUN else None,
+        "seasons": season_stats(data) if run in SEASON_RUNS else None,
     }
 
 
@@ -581,15 +590,18 @@ def plot_calibration_comparison(results, out_dir):
     plt.close(fig)
 
 
-def plot_calibration_seasons(seasons, out_dir):
-    """Reliability of SEASON_RUN, one curve per season, styled as calibration_comparison:
-    the black dashed diagonal (perfect calibration) is left to the caption."""
+def plot_calibration_seasons(season_runs, out_dir):
+    """Reliability of each ensemble in ``season_runs`` ({run: season_stats}), one curve per
+    ensemble and season, styled as calibration_comparison: the black dashed diagonal
+    (perfect calibration) is left to the caption."""
     fig, ax = plt.subplots()
     ax.plot([0, 1], [0, 1], color="black", linewidth=0.8, linestyle="--")
-    for season, s in seasons.items():
-        centers, filled, (mean, _, _) = s["calibration"]
-        ax.plot(centers[filled], mean, label=SEASON_TITLES[season], linewidth=1.25,
-                color=SEASON_COLORS[season])
+    for run, seasons in season_runs.items():
+        prefix, alpha, linestyle = SEASON_RUNS[run]
+        for season, s in seasons.items():
+            centers, filled, (mean, _, _) = s["calibration"]
+            ax.plot(centers[filled], mean, label=f"{prefix} {season}", linewidth=1.25,
+                    color=SEASON_COLORS[season], alpha=alpha, linestyle=linestyle)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_xlabel("predicted SIC")
@@ -601,20 +613,24 @@ def plot_calibration_seasons(seasons, out_dir):
     plt.close(fig)
 
 
-def plot_spread_skill_seasons(seasons, out_dir):
-    """Binned spread-skill diagram of SEASON_RUN, one line per season, styled as
-    ensemble_comparison.plot_spread_skill (dashed 1:1 line = perfect calibration)."""
+def plot_spread_skill_seasons(season_runs, out_dir):
+    """Binned spread-skill diagram of each ensemble in ``season_runs`` ({run: season_stats}),
+    one line per ensemble and season, styled as ensemble_comparison.plot_spread_skill
+    (dashed 1:1 line = perfect calibration). The marker marks the season, as the colour."""
     fig, ax = plt.subplots()
     top = 0.0
-    print(f"Spread-skill bins of {_name(SEASON_RUN)} ({SPREAD_SKILL_BINS}, marginal ice zone): "
-          f"RMSE / spread per bin")
-    for (season, s), marker in zip(seasons.items(), MARKERS):
-        rmse, spread = s["curve"]
-        ax.plot(rmse, spread, color=SEASON_COLORS[season], marker=marker, markersize=4,
-                label=SEASON_TITLES[season])
-        top = max(top, rmse.max(), spread.max())
-        print(f"  {season:<5} (n={s['n']:>3}) " + " ".join(f"{r:.2f}" for r in rmse / spread))
-    print()
+    for run, seasons in season_runs.items():
+        prefix, alpha, linestyle = SEASON_RUNS[run]
+        print(f"Spread-skill bins of {_name(run)} ({SPREAD_SKILL_BINS}, marginal ice zone): "
+              f"RMSE / spread per bin")
+        for (season, s), marker in zip(seasons.items(), MARKERS):
+            rmse, spread = s["curve"]
+            ax.plot(rmse, spread, color=SEASON_COLORS[season], marker=marker, markersize=4,
+                    alpha=alpha, linestyle=linestyle, label=f"{prefix} {season}")
+            top = max(top, rmse.max(), spread.max())
+            print(f"  {season:<5} (n={s['n']:>3}) "
+                  + " ".join(f"{r:.2f}" for r in rmse / spread))
+        print()
 
     top *= 1.05
     ax.plot([0, top], [0, top], color=MUTED, linewidth=0.8, linestyle=REF_LINESTYLE,
@@ -630,22 +646,30 @@ def plot_spread_skill_seasons(seasons, out_dir):
 
 
 def plot_season_figures(results, out_dir):
-    """calibration_seasons and spread_skill_seasons for SEASON_RUN, if it is in RUNS."""
-    if SEASON_RUN is None:
+    """calibration_seasons and spread_skill_seasons for the SEASON_RUNS that are in RUNS."""
+    if not SEASON_RUNS:
         return
-    seasons = next((r["seasons"] for r in results if r["run"] == SEASON_RUN), None)
-    if not seasons:
-        print(f"SEASON_RUN {SEASON_RUN} is not in RUNS (or has no cool/melt samples) -- "
-              f"skipping calibration_seasons and spread_skill_seasons.")
+    by_run = {r["run"]: r["seasons"] for r in results}
+    for run in SEASON_RUNS:
+        if not by_run.get(run):
+            print(f"SEASON_RUNS entry {run} is not in RUNS (or has no cool/melt samples) -- "
+                  f"leaving it out of calibration_seasons and spread_skill_seasons.")
+    season_runs = {run: by_run[run] for run in SEASON_RUNS if by_run.get(run)}
+    if not season_runs:
         return
-    print(f"{_name(SEASON_RUN)} per season: "
-          + ", ".join(f"{season} {s['n']} dates" for season, s in seasons.items()))
-    plot_calibration_seasons(seasons, out_dir)
+    for run, seasons in season_runs.items():
+        print(f"{_name(run)} per season: "
+              + ", ".join(f"{season} {s['n']} dates" for season, s in seasons.items()))
+    plot_calibration_seasons(season_runs, out_dir)
     print(f"Wrote {out_dir}/calibration_seasons.pdf")
-    if any(s["curve"] is None for s in seasons.values()):
-        print(f"{SEASON_RUN} is a single forecast -- skipping spread_skill_seasons.")
+    single = [run for run, seasons in season_runs.items()
+              if any(s["curve"] is None for s in seasons.values())]
+    if single:
+        print(f"{', '.join(single)}: single forecast -- left out of spread_skill_seasons.")
+    season_runs = {run: s for run, s in season_runs.items() if run not in single}
+    if not season_runs:
         return
-    plot_spread_skill_seasons(seasons, out_dir)
+    plot_spread_skill_seasons(season_runs, out_dir)
     print(f"Wrote {out_dir}/spread_skill_seasons.pdf")
 
 

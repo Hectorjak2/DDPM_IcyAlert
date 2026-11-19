@@ -63,7 +63,7 @@ class DDPMConfig:
     # (haze over open water, too little solid ice). Only affects sampling, plus the simulated
     # step of the unfolded loss (TrainConfig.unfolded_loss); with that off, no retraining needed.
     # The final reconstruction is clamped to [-1, 1] either way.
-    clamp_x0: bool = True
+    clamp_x0: bool = False
 
     # Reverse process used by ConditionalDDPM.sample. Sampling only: the same weights work with
     # either, so no retraining. "ddpm": ancestral sampling over all `timesteps` steps (Ho et al.).

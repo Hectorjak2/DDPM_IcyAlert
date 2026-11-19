@@ -30,6 +30,12 @@ Edit ``UNET_RUN`` / ``DDPM_RUN`` (folder names under ``results/``, as in
    of the ensemble mean (x) against the RMS spread (y) of one bin. The spread is scaled by
    sqrt((M+1)/M), so a calibrated M-member ensemble lies on the dashed 1:1 line for any M;
    below it the ensemble is under-dispersive, above it over-dispersive.
+6. ``<OUT_DIR>/iiee_case_<CASE_DATE>.pdf``: the same forecast as 4 as a binary map, the SIC
+   colour scale binarised at ICE_EDGE (true ice white, water dark blue), with the true ice
+   edge (black) and the ice edge of each ensemble mean (DDPM purple, U-Net green) and its
+   IIEE in the legend.
+   ``python -m plotting.ensemble_comparison --iiee-only`` loads only that forecast and
+   writes only this figure.
 
 Both ensembles are scored on the target dates they share, as in ``plotting.final_results``.
 """
@@ -39,14 +45,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import FormatStrFormatter
 
 from plotting.config import savefig, TEXTWIDTH_IN, COLORS, MARKERS, MUTED, REF_LINESTYLE, muted
 from plotting.ensemble_evaluation import (LAND_COLOR, SPREAD_SKILL_BINS, draw_rank_histogram,
                                           print_map_correlation, print_spread_skill,
                                           rank_statistics, spread_skill_curve, spread_skill_maps)
-from plotting.evaluation import (RESIDUAL_CMAP, RESIDUAL_VMAX, _clean_image_axis, load_leads,
-                                 mean_residuals, sample_errors)
+from plotting.evaluation import (ICE_EDGE, RESIDUAL_CMAP, RESIDUAL_VMAX, SIC_CMAP,
+                                 _clean_image_axis, _iiee, load_leads, mean_residuals, sample_errors)
 from plotting.final_results import _cell, _climatology, _subset
 
 # Folder names under results/. U-Net is the top row / left panel, DDPM the bottom row / right.
@@ -84,6 +92,19 @@ CASE_RESIDUAL_CMAP = SOFT_RESIDUAL_CMAP     # residuals: white at 0
 CASE_ERROR_CMAP = plt.cm.magma.copy()       # spread and absolute error
 CASE_ERROR_CMAP.set_bad(LAND_COLOR)
 CASE_VMAX_PERCENTILE = 99  # colour limits, over water; the top 1 % saturate
+# Ice-edge figure of the same forecast (iiee_case_<CASE_DATE>.pdf): the true ice (SIC >
+# ICE_EDGE) as a binary map, with the true edge and each ensemble mean's edge as contours.
+IIEE_EDGE_COLORS = {DDPM_RUN: "#8E5BB5", UNET_RUN: COLORS[0]}  # purple, green
+IIEE_TRUE_EDGE_COLOR = "black"
+# The SIC colour scale (SIC_CMAP, Blues_r) binarised: water its SIC = 0 dark blue, ice its
+# SIC = 1 white, land grey.
+IIEE_WATER_COLOR = SIC_CMAP(0.0)
+IIEE_ICE_COLOR = SIC_CMAP(1.0)
+IIEE_RUNS = [DDPM_RUN, UNET_RUN]         # legend order
+# Legend's lower-right corner, in axes fraction: low on the land, clear of every edge (the
+# edges curve through the lower-right corner itself).
+IIEE_LEGEND_ANCHOR = (0.81, 0.34)
+IIEE_ROW_LABELS = {UNET_RUN: "U-Net mean", DDPM_RUN: "DDPM mean"}
 
 def _name(run: str) -> str:
     return LABELS.get(run, run)
@@ -138,6 +159,9 @@ def case_fields(data, date):
         "spread": members.std(axis=0, ddof=1),
         "error": np.abs(mean - target),
         "k_date": pd.Timestamp(data["times"][index][1]),
+        # SIC fields, for the ice-edge figure.
+        "target_sic": target,
+        "mean_sic": mean,
     }
 
 
@@ -348,6 +372,64 @@ def plot_case_maps(scores, out_dir):
     print(f"Wrote {out_dir}/{name}.pdf")
 
 
+def plot_iiee_case(cases, out_dir):
+    """The CASE_DATE forecast as a binary ice map, the SIC colour scale binarised at ICE_EDGE:
+    true ice white, water dark blue, land grey. The true ice edge in black and each ensemble
+    mean's ice edge (the ICE_EDGE contour of the ensemble mean) in IIEE_EDGE_COLORS; the
+    legend, in the lower-right corner over open water, gives each ensemble mean's IIEE.
+    ``cases``: {run: case_fields(...)}."""
+    runs = [run for run in IIEE_RUNS if cases.get(run) is not None]
+    if not runs:
+        print(f"No forecast with target {CASE_DATE} -- skipping iiee_case.")
+        return
+    target = cases[runs[0]]["target_sic"]
+
+    # 0 = water, 1 = ice, NaN = land.
+    binary = np.where(np.isfinite(target), (target > ICE_EDGE).astype(float), np.nan)
+    cmap = ListedColormap([IIEE_WATER_COLOR, IIEE_ICE_COLOR])
+    cmap.set_bad(LAND_COLOR)
+
+    fig, ax = plt.subplots()
+    ax.imshow(binary, cmap=cmap, vmin=0, vmax=1, origin="lower", interpolation="none")
+    ax.contour(target, levels=[ICE_EDGE], colors=IIEE_TRUE_EDGE_COLOR, linewidths=0.9)
+    handles = [Line2D([], [], color=IIEE_TRUE_EDGE_COLOR, linewidth=0.9, label="True edge")]
+    print(f"Ice edge (SIC > {ICE_EDGE}) of the forecast {cases[runs[0]]['k_date']:%Y-%m-%d} "
+          f"-> {CASE_DATE}:")
+    for run in runs:
+        mean = cases[run]["mean_sic"]
+        iiee = _iiee(mean, target)
+        print(f"  {_name(run):<22} IIEE of the ensemble mean {iiee / 1e3:.1f} x 10^3 km^2")
+        ax.contour(mean, levels=[ICE_EDGE], colors=IIEE_EDGE_COLORS[run], linewidths=0.9)
+        handles.append(Line2D([], [], color=IIEE_EDGE_COLORS[run], linewidth=0.9,
+                              label=rf"{IIEE_ROW_LABELS[run]}: ${iiee / 1e3:.1f}$"))
+    print()
+    _clean_image_axis(ax)
+    # Over the land, on a white box so it reads over the coast.
+    ax.legend(handles=handles, loc="lower right", bbox_to_anchor=IIEE_LEGEND_ANCHOR,
+              title=r"IIEE ($10^3$ km$^2$)",
+              frameon=True, facecolor="white", edgecolor="none", framealpha=0.9,
+              handlelength=1.1, handletextpad=0.4, labelspacing=0.3, borderpad=0.3,
+              borderaxespad=0)
+
+    name = f"iiee_case_{CASE_DATE}"
+    side = 0.6 * TEXTWIDTH_IN  # square map
+    savefig(fig, out_dir, name, width=side, height=side)
+    plt.close(fig)
+    print(f"Wrote {out_dir}/{name}.pdf")
+
+
+def load_cases(runs):
+    """Only the CASE_DATE forecast of each run, {run: case_fields(...)}, for --iiee-only;
+    each pickle is freed before the next is loaded."""
+    cases = {}
+    for run in runs:
+        print(f"Loading {run} ...")
+        _, leads = load_leads(run)
+        cases[run] = case_fields(leads[LEAD - 1], pd.Timestamp(CASE_DATE))
+        del leads
+    return cases
+
+
 def plot_spread_skill(scores, out_dir):
     """Binned spread-skill diagram: RMSE of the ensemble mean (x) vs finite-M corrected
     spread (y), one line per ensemble, with the dashed 1:1 line of perfect calibration."""
@@ -374,19 +456,25 @@ def plot_spread_skill(scores, out_dir):
     plt.close(fig)
 
 
-def main():
+def main(iiee_only: bool = False):
+    out_dir = Path(OUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if iiee_only:
+        plot_iiee_case(load_cases(IIEE_RUNS), out_dir)
+        return
+
     scores = load_all(RUNS)
     print_accuracy_tables(scores)
 
-    out_dir = Path(OUT_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
     plot_rank_histograms(scores, out_dir)
     print(f"Wrote {out_dir}/ensemble_rank_histograms.pdf")
     plot_season_maps(scores, out_dir)
     plot_case_maps(scores, out_dir)
+    plot_iiee_case({run: s["case"] for run, s in scores.items()}, out_dir)
     plot_spread_skill(scores, out_dir)
     print(f"Wrote {out_dir}/ensemble_spread_skill.pdf")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(iiee_only="--iiee-only" in sys.argv)
