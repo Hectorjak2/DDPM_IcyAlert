@@ -13,12 +13,10 @@ from main import run_ddpm
 
 # (new name suffix, schedule, cosine_shift_res; the shift is ignored by cosine and linear)
 RUNS = [
-    ("cosine", "cosine", 64),
-    ("linear", "linear", 64),
     ("256", "shifted_cosine", 256),
-    ("32", "shifted_cosine", 32),
     ("64", "shifted_cosine", 64),
     ("128", "shifted_cosine", 128),
+    ("32", "shifted_cosine", 32),
 ]
 
 # Fail now, not hours in, if any run's weights are missing (paths relative to the submit dir).
